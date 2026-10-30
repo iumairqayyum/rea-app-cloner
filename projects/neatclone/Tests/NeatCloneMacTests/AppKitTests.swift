@@ -17,7 +17,7 @@ import XCTest
         try UIVerification.verifyTextField(field, in: window)
         let sheet = NSWindow(contentRect: window.frame, styleMask: [.titled], backing: .buffered, defer: false)
         let sheetField = NSTextField(frame: field.frame); sheet.contentView?.addSubview(sheetField)
-        window.beginSheet(sheet); sheet.makeKey()
+        window.beginSheet(sheet, completionHandler: nil); sheet.makeKey()
         try UIVerification.verifyTextField(sheetField, in: sheet)
         window.endSheet(sheet); sheet.orderOut(nil); window.orderOut(nil)
     }
