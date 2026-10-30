@@ -145,7 +145,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
         NSApp.mainMenu = UIMenus.make(target: self)
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { ["add", "resume", "pause", .flexibleSpace, "queue", "settings"] }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [NSToolbarItem.Identifier("add"), NSToolbarItem.Identifier("resume"), NSToolbarItem.Identifier("pause"),
+         .flexibleSpace, NSToolbarItem.Identifier("queue"), NSToolbarItem.Identifier("settings")]
+    }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) + [.space] }
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         let choices: [String: (String, String, Selector)] = ["add": ("Add URL", "plus", #selector(focusURL(_:))), "resume": ("Start / Resume", "play.fill", #selector(resume(_:))), "pause": ("Pause", "pause.fill", #selector(pause(_:))), "queue": ("Queue", "list.bullet", #selector(showScheduler(_:))), "settings": ("Settings", "gearshape", #selector(showSettings(_:)))]
