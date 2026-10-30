@@ -27,7 +27,7 @@ import XCTest
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
         let table = DownloadTableView(frame: NSRect(x: 0, y: 0, width: 400, height: 150)); let rows = Rows()
         table.dataSource = rows; table.allowsMultipleSelection = true; table.addTableColumn(NSTableColumn(identifier: .init("name")))
-        table.copyText = { "one.mp4\ntwo.mp4" }; window.contentView?.addSubview(table); table.reloadData(); window.makeKeyAndOrderFront(nil); window.makeFirstResponder(table)
+        table.copyText = { "one.mp4\ntwo.mp4" }; window.contentView?.addSubview(table); table.reloadData(); try UIVerification.prepareWindow(window); XCTAssertTrue(window.makeFirstResponder(table)); XCTAssertTrue(window.firstResponder === table)
         XCTAssertTrue(NSApp.sendAction(Selector(("selectAll:")), to: nil, from: nil)); XCTAssertEqual(table.numberOfSelectedRows, 2)
         XCTAssertTrue(NSApp.sendAction(Selector(("copy:")), to: nil, from: nil)); XCTAssertEqual(NSPasteboard.general.string(forType: .string), "one.mp4\ntwo.mp4")
         window.orderOut(nil)

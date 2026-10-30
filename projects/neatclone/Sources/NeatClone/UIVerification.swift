@@ -3,6 +3,35 @@ import AppKit
 
 @MainActor enum UIVerification {
     struct Failure: Error { let message: String }
+    private static var preparedApplication = false
+
+    /// XCTest's command-line runner does not call NSApplication.run(). Bootstrap
+    /// the normal AppKit lifecycle and wait for WindowServer activation before
+    /// testing nil-target responder dispatch. Real app probes already have a run loop.
+    static func prepareWindow(_ window: NSWindow) throws {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        if !preparedApplication {
+            preparedApplication = true
+            if !app.isRunning { app.finishLaunching() }
+        }
+        app.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        window.makeKey()
+        let deadline = Date().addingTimeInterval(3)
+        repeat {
+            app.updateWindows()
+            while let event = app.nextEvent(matching: .any, until: Date().addingTimeInterval(0.02), inMode: .default, dequeue: true) {
+                app.sendEvent(event)
+                if Date() >= deadline { break }
+            }
+            if app.keyWindow === window && window.isKeyWindow { break }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            window.makeKey()
+        } while Date() < deadline
+        try require(app.keyWindow === window && window.isKeyWindow, "AppKit window never became key after application activation")
+    }
     static func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
         if !condition() { throw Failure(message: message) }
     }
@@ -21,12 +50,13 @@ import AppKit
         }
     }
     static func verifyTextField(_ field: NSTextField, in window: NSWindow) throws {
-        window.makeKeyAndOrderFront(nil)
+        try prepareWindow(window)
         field.stringValue = "original"
         try require(window.makeFirstResponder(field), "Cannot focus input")
         field.selectText(nil)
         guard let editor = field.currentEditor() as? NSTextView else { throw Failure(message: "No field editor") }
         editor.allowsUndo = true
+        try require(window.firstResponder === editor, "Field editor is not the window first responder")
         try require(NSApp.sendAction(Selector(("selectAll:")), to: nil, from: nil), "Select All not routed")
         try require(editor.selectedRange().length == "original".utf16.count, "Select All selected wrong range")
         try require(NSApp.sendAction(Selector(("copy:")), to: nil, from: nil), "Copy not routed")
