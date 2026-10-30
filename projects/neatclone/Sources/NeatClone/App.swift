@@ -264,7 +264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
         case "bytes": text = job.kind == .hls ? "\(job.bytes) segments" : ByteCountFormatter.string(fromByteCount: job.bytes, countStyle: .file) + (job.total.map { " / " + ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "")
         case "speed": text = job.status == .downloading ? (job.kind == .hls ? String(format: "%.1f segments/s", job.speed) : ByteCountFormatter.string(fromByteCount: Int64(max(0, job.speed)), countStyle: .file) + "/s") : "—"
         case "eta": text = job.eta.map { seconds in seconds.isFinite ? String(format: "%dm %02ds", Int(seconds) / 60, Int(seconds) % 60) : "—" } ?? "—"
-        case "connections": text = "\(job.activeConnections) active"
+        case "connections": text = job.kind == .hls ? "—" : "\(job.activeConnections) active"
         case "queue": text = queueName(job)
         default: text = ""
         }
