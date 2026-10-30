@@ -1,6 +1,9 @@
 # Project 01 — NeatClone (NDM-inspired download manager)
 
-Status: planning / evidence collection. No claim of completed reverse engineering.
+Status: first functional vertical slice implemented; portable Linux checks pass.
+macOS AppKit execution and real Chrome-to-Mac handoff remain unverified. See
+[artifact evidence](ndm-analysis.md) and [verification results](neatclone-verification.md).
+No claim of completed reverse engineering.
 
 ## Objective
 Build an original macOS 12+ (Intel x86_64) download manager with familiar download-manager workflows, Chrome Manifest V3 extension integration, and video handling that prefers direct MP4 when an accessible equivalent exists.
@@ -30,4 +33,8 @@ Build an original macOS 12+ (Intel x86_64) download manager with familiar downlo
 - No assertion of native macOS build success until compiled and run on a Mac.
 
 ## Immediate next action
-Request target NDM artifact/extension package if REA binary inspection is desired; otherwise start from documented observable behavior. Codex should implement and test incrementally, commit changes, and report limitations.
+Both user-supplied DMG and CRX were inspected statically. Validate the AppKit build
+and Chrome native-host handoff on an Intel macOS 12+ installation using
+`projects/neatclone/README.md`; continue deeper native analysis only with a
+configured provider and authorized runtime evidence. Do not infer unobserved
+NDM implementation details from the first slice.

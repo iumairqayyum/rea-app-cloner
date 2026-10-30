@@ -1,0 +1,9 @@
+body { width: 390px; margin: 18px; font: 14px system-ui, sans-serif; color: #172536; background: #f7f9fc; }
+h1 { margin: 0 0 8px; font-size: 22px; }
+p { line-height: 1.45; }
+button { padding: 7px 10px; border: 1px solid #8497ac; border-radius: 6px; background: white; cursor: pointer; }
+button:disabled { opacity: .55; cursor: default; }
+ul { padding: 0; list-style: none; max-height: 310px; overflow: auto; }
+li { background: white; border: 1px solid #d4dfe9; border-radius: 6px; padding: 10px; margin: 8px 0; overflow-wrap: anywhere; }
+li span { display: block; margin-bottom: 6px; }
+.note { color: #536579; font-size: 12px; }

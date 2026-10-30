@@ -1,0 +1,6 @@
+{
+  "name": "neatclone-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node --test --test-isolation=none tests/*.test.js"}
+}

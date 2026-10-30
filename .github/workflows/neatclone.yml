@@ -1,0 +1,36 @@
+name: NeatClone
+on:
+  push:
+    paths: ['projects/neatclone/**', '.github/workflows/neatclone.yml']
+  pull_request:
+    paths: ['projects/neatclone/**', '.github/workflows/neatclone.yml']
+jobs:
+  linux-core:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: projects/neatclone
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '6.0.3'
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: swift test -j 2
+      - run: python3 scripts/check-integration.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm test --prefix extension
+  macos-build:
+    runs-on: macos-15-intel
+    defaults:
+      run:
+        working-directory: projects/neatclone
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/build-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NeatClone-Intel-developer-build
+          path: projects/neatclone/dist/NeatClone.app

@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "NeatClone Link Handoff",
+  "version": "0.1.0",
+  "description": "Choose media from a site you authorize and send its URL to NeatClone.",
+  "permissions": ["activeTab", "scripting", "nativeMessaging", "webRequest"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "action": {"default_popup": "popup.html", "default_title": "Send media to NeatClone"}
+}

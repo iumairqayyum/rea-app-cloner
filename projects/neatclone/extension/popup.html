@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>NeatClone</title>
+<link rel="stylesheet" href="popup.css">
+<body>
+<h1>NeatClone</h1>
+<p>On a page you are authorized to download, enable this site and scan for media. No cookies are copied.</p>
+<button id="scan">Enable this site &amp; scan</button>
+<button id="refresh">Refresh observed media</button>
+<p id="status" role="status">Only URLs from this page are inspected. Start playback after scanning to observe media responses.</p>
+<ul id="candidates"></ul>
+<p class="note">MP4 is preferred only for sources with the same media element and explicit quality. TS segments are not complete videos. DRM and encrypted HLS are unsupported.</p>
+<p class="note">Install the NeatClone macOS app and its Chrome native messaging host first. Sending a URL does not transfer browser authentication.</p>
+<script type="module" src="popup.js"></script>
+</body></html>
