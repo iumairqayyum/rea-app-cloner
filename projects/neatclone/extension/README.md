@@ -35,8 +35,7 @@ are labeled as segments and cannot be queued as complete videos. HLS requires an
 unencrypted playlist supported by the app. DRM is unsupported.
 
 Known limits: main-frame scan only, no cross-frame DOM traversal, no arbitrary
-site/player-specific extraction, no blob/MediaSource reconstruction, no automatic
-download interception, and no cookie/session transfer. MIME observation of a CDN
+site/player-specific extraction, no blob/MediaSource reconstruction, no cookie/session transfer, and no cross-browser adapter. MIME observation of a CDN
 requires that CDN to have been granted permission separately. These are deliberate
 limits, not claims of parity with the original extension.
 
@@ -62,5 +61,27 @@ In the current Codex Cloud machine, actual unpacked-extension loading is blocked
 by managed Chromium `ExtensionInstallBlocklist: ["*"]`. The smoke script reports
 that blocker and exits 2 without trying to bypass policy. Initial browser load
 attempts did not register the extension; native messaging with the real browser
-therefore remains unverified. The 10 Node tests pass independently. macOS Chrome
+therefore remains unverified. The 20 Node tests pass independently. macOS Chrome
 installation and handoff must be checked on a machine whose policy permits it.
+
+
+## Phase 02 opt-in capture
+
+Interception is disabled by default. Open **Interception settings** in the popup,
+choose the extension allowlist/minimum MiB, and explicitly enable it for the current
+site. Chrome's `downloads` permission is required, but no automatic capture occurs
+without that site setting and host grants. Known size and MIME/attachment
+validation are mandatory; unknown/small/unsafe responses remain with Chrome.
+Eligible browser transfers pause while the native host receives the request;
+Chrome is cancelled only after durable native acknowledgement, otherwise resumed.
+Acknowledgement is not download completion: check the app for actual result.
+
+Use the **Send link to NeatClone** browser context menu for explicit links, or scan
+then choose **Show floating media control** to add a user-click control for the
+actual discovered HTML5 media candidates. Synthetic clicks and forged content
+messages cannot hand off arbitrary URLs. No fictitious quality choices are made.
+
+Only filter defaults and approved site patterns are saved in extension storage.
+Option/Ctrl click bypass cannot be inferred from Chrome's downloads API; disable
+interception for that site instead. Safari/Orion adapters remain unverified and
+are not shipped. See [detailed scope and limitations](../../../docs/phase02-extension.md).

@@ -54,3 +54,39 @@ document.getElementById("refresh").addEventListener("click", async () => {
     status.textContent = `${reply.candidates?.length || 0} candidates. Cross-site media needs its own permission before sending.`;
   } catch { status.textContent = "Scan a supported page first."; }
 });
+
+async function showSettings() {
+  const reply = await chrome.runtime.sendMessage({action: 'settings'});
+  if (!reply?.ok) return;
+  document.getElementById('extensions').value = reply.settings.extensions.join(',');
+  document.getElementById('minimum').value = reply.settings.minimumMB;
+  const current = await tab();
+  const enabled = reply.settings.interceptionSites.includes(sitePattern(current.url));
+  document.getElementById('enableInterception').disabled = enabled;
+  document.getElementById('disableInterception').disabled = !enabled;
+}
+document.getElementById('saveSettings').addEventListener('click', async () => {
+  try {
+    const reply = await chrome.runtime.sendMessage({action: 'saveSettings', extensions: document.getElementById('extensions').value.split(/[\s,;]+/), minimumMB: Number(document.getElementById('minimum').value)});
+    status.textContent = reply?.ok ? 'Filters saved. Unknown/small resources are not intercepted.' : 'Could not save filters.';
+    await showSettings();
+  } catch {status.textContent = 'Could not save settings.';}
+});
+for (const [id, enabled] of [['enableInterception', true], ['disableInterception', false]]) {
+  document.getElementById(id).addEventListener('click', async () => {
+    try {
+      const current = await tab();
+      if (enabled && !await chrome.permissions.request({origins: [sitePattern(current.url)]})) throw new Error('denied');
+      const reply = await request('interception', {enabled});
+      status.textContent = reply?.ok ? (enabled ? 'Interception enabled for this site only.' : 'Interception disabled for this site.') : 'Could not change interception.';
+      await showSettings();
+    } catch {status.textContent = 'Authorize an HTTP(S) site before enabling interception.';}
+  });
+}
+document.getElementById('floating').addEventListener('click', async () => {
+  try {
+    const reply = await request('floating');
+    status.textContent = reply?.ok ? 'Floating control installed for discovered HTML5 media.' : 'Enable this site and scan first.';
+  } catch {status.textContent = 'Enable this site and scan first.';}
+});
+showSettings().catch(() => {});
