@@ -1,7 +1,7 @@
 // Independent implementation. No target extension code is used here.
 export const HOST = "com.neatclone.bridge";
 export function httpURL(value) {
-  if (typeof value !== "string" || value.length > 8192) throw new Error("Invalid URL");
+  if (typeof value !== "string" || value.length > 8192 || /[\x00-\x1f\x7f]/.test(value)) throw new Error("Invalid URL");
   const url = new URL(value);
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
     throw new Error("Only HTTP(S) URLs without embedded credentials are supported");
