@@ -130,7 +130,11 @@ private final class HLSFetch: NSObject, URLSessionDataDelegate, @unchecked Senda
     var task: URLSessionDataTask?
     private let lock = NSLock()
     private var cancelled = false
-    init(limit: Int) { self.limit = limit }
+    let rateGate: TransferRateGate
+    let authorization: TransferAuthorization?
+    init(limit: Int, limiter: ByteRateLimiter? = nil, globalLimiter: ByteRateLimiter? = nil, authorization: TransferAuthorization? = nil) {
+        self.limit = limit; self.rateGate = TransferRateGate(local: limiter, global: globalLimiter); self.authorization = authorization
+    }
     func fetch(_ url: URL) async throws -> (Data, HTTPURLResponse) {
         try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
@@ -142,6 +146,7 @@ private final class HLSFetch: NSObject, URLSessionDataDelegate, @unchecked Senda
                 let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
                 self.session = session
                 var request = URLRequest(url: url); request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+                request.setValue(authorization?.header(for: url), forHTTPHeaderField: "Authorization")
                 task = session.dataTask(with: request); task?.resume()
             }
         }, onCancel: { self.lock.lock(); self.cancelled = true; self.task?.cancel(); self.lock.unlock() })
@@ -155,10 +160,15 @@ private final class HLSFetch: NSObject, URLSessionDataDelegate, @unchecked Senda
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         guard let url = request.url, ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.user == nil, url.password == nil else { completionHandler(nil); return }
         guard !(response.url?.scheme == "https" && url.scheme == "http") else { completionHandler(nil); return }
-        completionHandler(request)
+        var next = request
+        next.setValue(authorization?.header(for: url), forHTTPHeaderField: "Authorization")
+        completionHandler(next)
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        if self.data.count + data.count > limit { task?.cancel() } else { self.data.append(data) }
+        do {
+            try rateGate.wait(data.count, cancelled: { self.lock.lock(); defer { self.lock.unlock() }; return self.cancelled })
+            if self.data.count + data.count > limit { task?.cancel() } else { self.data.append(data) }
+        } catch { dataTask.cancel() }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         defer { session.finishTasksAndInvalidate(); self.session = nil }
@@ -209,7 +219,11 @@ private final class HLSProcess: @unchecked Sendable {
 
 public struct HLSDownloader {
     public let ffmpeg: URL
-    public init(ffmpeg: URL? = nil) {
+    public let limiter: ByteRateLimiter?
+    public let globalLimiter: ByteRateLimiter?
+    public let authorization: TransferAuthorization?
+    public init(ffmpeg: URL? = nil, limiter: ByteRateLimiter? = nil, globalLimiter: ByteRateLimiter? = nil, authorization: TransferAuthorization? = nil) {
+        self.limiter = limiter; self.globalLimiter = globalLimiter; self.authorization = authorization
         let configured = ProcessInfo.processInfo.environment["NEATCLONE_FFMPEG"]
         self.ffmpeg = ffmpeg ?? URL(fileURLWithPath: configured ?? (["/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"].first { FileManager.default.isExecutableFile(atPath: $0) } ?? "/usr/local/bin/ffmpeg"))
     }
@@ -269,12 +283,12 @@ public struct HLSDownloader {
     }
     private func load(_ url: URL) async throws -> HLSPlaylist {
         _ = try HLSPlaylist.webURL(url.absoluteString, base: url)
-        let (data, response) = try await HLSFetch(limit: 1_048_576).fetch(url)
+        let (data, response) = try await HLSFetch(limit: 1_048_576, limiter: limiter, globalLimiter: globalLimiter, authorization: authorization).fetch(url)
         guard let text = String(data: data, encoding: .utf8) else { throw HLSError.invalidPlaylist }
         return try HLSPlaylist.parse(text, baseURL: response.url ?? url)
     }
     private func save(_ url: URL, to path: URL) async throws -> Int64 {
-        let (data, _) = try await HLSFetch(limit: 64 * 1024 * 1024).fetch(url)
+        let (data, _) = try await HLSFetch(limit: 64 * 1024 * 1024, limiter: limiter, globalLimiter: globalLimiter, authorization: authorization).fetch(url)
         guard !data.isEmpty else { throw HLSError.invalidPlaylist }
         try data.write(to: path, options: .atomic)
         return Int64(data.count)
