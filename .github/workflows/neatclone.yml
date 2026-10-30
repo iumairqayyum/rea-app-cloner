@@ -14,6 +14,7 @@ concurrency:
 jobs:
   linux-core:
     runs-on: ubuntu-22.04
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: projects/neatclone
@@ -30,6 +31,7 @@ jobs:
           node-version: '24'
       - run: npm test --prefix extension
   macos-build:
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -53,7 +55,7 @@ jobs:
       - name: Build architecture-specific application
         run: NEATCLONE_ARCH=${{ matrix.arch }} bash scripts/build-macos.sh
       - name: AppKit launch, responder checks and screenshot
-        run: dist/NeatClone.app/Contents/MacOS/NeatClone --ui-smoke-output "$PWD/dist/NeatClone-${{ matrix.arch }}.png"
+        run: python3 -c 'import subprocess,sys; subprocess.run(["dist/NeatClone.app/Contents/MacOS/NeatClone", "--ui-smoke-output", sys.argv[1]], check=True, timeout=90)' "$PWD/dist/NeatClone-${{ matrix.arch }}.png"
       - name: Package executable-preserving app ZIP
         run: ditto -c -k --sequesterRsrc --keepParent dist/NeatClone.app dist/NeatClone-${{ matrix.arch }}.zip
       - uses: actions/upload-artifact@v4
