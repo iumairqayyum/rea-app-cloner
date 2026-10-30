@@ -1,0 +1,64 @@
+#if os(macOS)
+import AppKit
+
+@MainActor enum UIVerification {
+    struct Failure: Error { let message: String }
+    static func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+        if !condition() { throw Failure(message: message) }
+    }
+    static func verifyMenus(_ menu: NSMenu) throws {
+        guard let edit = menu.items.first(where: { $0.title == "Edit" })?.submenu else { throw Failure(message: "Missing Edit menu") }
+        let expected: [(String, String, String, NSEvent.ModifierFlags)] = [
+            ("Undo", "undo:", "z", .command), ("Redo", "redo:", "z", [.command, .shift]),
+            ("Cut", "cut:", "x", .command), ("Copy", "copy:", "c", .command),
+            ("Paste", "paste:", "v", .command), ("Select All", "selectAll:", "a", .command)
+        ]
+        for (title, selector, key, modifiers) in expected {
+            guard let item = edit.items.first(where: { $0.title == title }) else { throw Failure(message: "Missing \(title)") }
+            try require(item.action == Selector(selector), "Wrong \(title) action")
+            try require(item.target == nil, "\(title) must use responder chain")
+            try require(item.keyEquivalent == key && item.keyEquivalentModifierMask == modifiers, "Wrong \(title) shortcut")
+        }
+    }
+    static func verifyTextField(_ field: NSTextField, in window: NSWindow) throws {
+        window.makeKeyAndOrderFront(nil)
+        field.stringValue = "original"
+        try require(window.makeFirstResponder(field), "Cannot focus input")
+        field.selectText(nil)
+        guard let editor = field.currentEditor() as? NSTextView else { throw Failure(message: "No field editor") }
+        editor.allowsUndo = true
+        try require(NSApp.sendAction(Selector(("selectAll:")), to: nil, from: nil), "Select All not routed")
+        try require(editor.selectedRange().length == "original".utf16.count, "Select All selected wrong range")
+        try require(NSApp.sendAction(Selector(("copy:")), to: nil, from: nil), "Copy not routed")
+        try require(NSPasteboard.general.string(forType: .string) == "original", "Copy returned wrong text")
+        try require(NSApp.sendAction(Selector(("cut:")), to: nil, from: nil), "Cut not routed")
+        try require(editor.string.isEmpty, "Cut did not edit field")
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString("replacement", forType: .string)
+        try require(NSApp.sendAction(Selector(("paste:")), to: nil, from: nil), "Paste not routed")
+        try require(editor.string == "replacement", "Paste did not edit field")
+        // Field editors group undo at event boundaries. Close the open event group
+        // before routing the standard Undo/Redo actions, exactly as the next event does.
+        if let undo = editor.undoManager {
+            while undo.groupingLevel > 0 { undo.endUndoGrouping() }
+            if undo.canUndo {
+                try require(NSApp.sendAction(Selector(("undo:")), to: nil, from: nil), "Undo not routed")
+                try require(editor.string != "replacement", "Undo did not edit field")
+                if undo.canRedo {
+                    try require(NSApp.sendAction(Selector(("redo:")), to: nil, from: nil), "Redo not routed")
+                    try require(editor.string == "replacement", "Redo did not restore field")
+                } else { throw Failure(message: "Redo unavailable after Undo") }
+            } else { throw Failure(message: "Undo unavailable after Paste") }
+        } else { throw Failure(message: "Input has no undo manager") }
+        _ = window.makeFirstResponder(nil)
+    }
+    static func png(window: NSWindow, to output: URL) throws {
+        guard let view = window.contentView else { throw Failure(message: "Missing content view") }
+        view.layoutSubtreeIfNeeded()
+        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw Failure(message: "Cannot capture view") }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        guard let data = bitmap.representation(using: .png, properties: [:]), !data.isEmpty else { throw Failure(message: "No PNG representation") }
+        try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: output, options: .atomic)
+    }
+}
+#endif
