@@ -5,6 +5,13 @@ native message → durable private inbox → Swift queue → real file download.
 The macOS interface uses AppKit and targets **macOS Monterey 12+ on Intel**.
 This is an early developer build, not a signed/notarized consumer installer.
 
+**Phase 02:** the recovered implementation adds adaptive verified ranges,
+address refresh, payload throttling, named scheduled queues, Keychain credentials,
+standard macOS editing shortcuts, richer AppKit controls, and opt-in browser
+interception. See the [consolidated Phase 02 report](../../docs/phase02-progress.md)
+for migration details, actual validation, current limitations and build artifacts.
+The first-slice description below remains useful background; Phase 02 extends it.
+
 The supplied Neat Download Manager artifacts were inspected statically before
 implementation. See [the evidence ledger](../../docs/ndm-analysis.md) for confirmed
 facts, inferences and gaps. No target code, icons or proprietary binaries are
@@ -143,8 +150,9 @@ The portable CLI can download a user-authorized URL:
 
 The CLI is a test/automation harness; queue pause/resume controls are in the app
 and shared API. Do not paste a signed URL into public logs or commit it. URL
-renewal, FTP, proxy configuration, bandwidth caps, parallel acceleration, rich
-search/filtering and automatic site-specific extraction are not in this slice.
+FTP, proxy configuration and automatic site-specific extraction remain outside
+this build. Phase 02 adds checked URL refresh, rate caps, verified parallel range
+work and grid filtering as described in its report.
 
 ## macOS acceptance work still required
 

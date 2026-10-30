@@ -1,9 +1,16 @@
 name: NeatClone
 on:
   push:
+    branches: [main]
     paths: ['projects/neatclone/**', '.github/workflows/neatclone.yml']
   pull_request:
+    branches: [main]
     paths: ['projects/neatclone/**', '.github/workflows/neatclone.yml']
+permissions:
+  contents: read
+concurrency:
+  group: neatclone-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   linux-core:
     runs-on: ubuntu-22.04
@@ -23,14 +30,37 @@ jobs:
           node-version: '24'
       - run: npm test --prefix extension
   macos-build:
-    runs-on: macos-15-intel
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     defaults:
       run:
         working-directory: projects/neatclone
     steps:
       - uses: actions/checkout@v4
-      - run: bash scripts/build-macos.sh
+      - name: Ensure media fixture tools
+        run: command -v ffmpeg >/dev/null || brew install ffmpeg
+      - name: Swift and macOS integration tests
+        run: swift test -j 2
+      - name: Controlled transfer CPU and memory profile
+        run: mkdir -p dist && python3 scripts/profile-transfer.py > dist/transfer-profile-${{ matrix.arch }}.json
+      - name: Build architecture-specific application
+        run: NEATCLONE_ARCH=${{ matrix.arch }} bash scripts/build-macos.sh
+      - name: AppKit launch, responder checks and screenshot
+        run: dist/NeatClone.app/Contents/MacOS/NeatClone --ui-smoke-output "$PWD/dist/NeatClone-${{ matrix.arch }}.png"
+      - name: Package executable-preserving app ZIP
+        run: ditto -c -k --sequesterRsrc --keepParent dist/NeatClone.app dist/NeatClone-${{ matrix.arch }}.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: NeatClone-Intel-developer-build
-          path: projects/neatclone/dist/NeatClone.app
+          name: NeatClone-${{ matrix.arch }}-developer-build
+          if-no-files-found: error
+          path: |
+            projects/neatclone/dist/NeatClone-${{ matrix.arch }}.zip
+            projects/neatclone/dist/NeatClone-${{ matrix.arch }}.png
+            projects/neatclone/dist/transfer-profile-${{ matrix.arch }}.json

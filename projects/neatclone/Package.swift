@@ -14,6 +14,7 @@ let package = Package(
         .executableTarget(name: "NeatClone", dependencies: ["NeatCloneCore"]),
         .executableTarget(name: "NeatCloneCLI", dependencies: ["NeatCloneCore"]),
         .executableTarget(name: "NeatCloneBridge", dependencies: ["NeatCloneCore"]),
-        .testTarget(name: "NeatCloneCoreTests", dependencies: ["NeatCloneCore"])
+        .testTarget(name: "NeatCloneCoreTests", dependencies: ["NeatCloneCore"]),
+        .testTarget(name: "NeatCloneMacTests", dependencies: ["NeatClone", "NeatCloneCore"])
     ]
 )
