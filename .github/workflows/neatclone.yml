@@ -49,7 +49,7 @@ jobs:
       - name: Ensure media fixture tools
         run: command -v ffmpeg >/dev/null || brew install ffmpeg
       - name: Swift and macOS integration tests
-        run: swift test -j 2
+        run: python3 scripts/run-macos-tests.py
       - name: Controlled transfer CPU and memory profile
         run: mkdir -p dist && python3 scripts/profile-transfer.py > dist/transfer-profile-${{ matrix.arch }}.json
       - name: Build architecture-specific application
@@ -66,3 +66,9 @@ jobs:
             projects/neatclone/dist/NeatClone-${{ matrix.arch }}.zip
             projects/neatclone/dist/NeatClone-${{ matrix.arch }}.png
             projects/neatclone/dist/transfer-profile-${{ matrix.arch }}.json
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: NeatClone-${{ matrix.arch }}-test-diagnostics
+          if-no-files-found: ignore
+          path: projects/neatclone/dist/test-diagnostics/
