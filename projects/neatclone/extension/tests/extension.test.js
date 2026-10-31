@@ -12,7 +12,8 @@ test("manifest installs no broad host access or credential capture permissions",
   assert.equal(manifest.host_permissions, undefined);
   assert.equal(manifest.content_scripts, undefined);
   assert.ok(manifest.permissions.includes("nativeMessaging"));
-  for (const permission of ["cookies", "downloads", "debugger", "webRequestBlocking"]) assert.ok(!manifest.permissions.includes(permission));
+  assert.ok(manifest.permissions.includes("downloads"));
+  for (const permission of ["cookies", "debugger", "webRequestBlocking"]) assert.ok(!manifest.permissions.includes(permission));
 });
 test("classifies MIME and pathname without mistaking query parameters for a file", () => {
   assert.equal(classify("https://cdn.test/v.mp4?token=secret"), "direct");

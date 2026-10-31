@@ -27,8 +27,15 @@ public final class DirectDownloader: NSObject, URLSessionDataDelegate, @unchecke
     private var destination: URL!
     private var source: URL!
     private var progress: (@Sendable (Int64, Int64?) -> Void)?
+    private let rateGate: TransferRateGate
+    private let authorization: TransferAuthorization?
 
-    public override init() { super.init() }
+    public override convenience init() { self.init(limiter: nil, globalLimiter: nil, authorization: nil) }
+    public init(limiter: ByteRateLimiter? = nil, globalLimiter: ByteRateLimiter? = nil, authorization: TransferAuthorization? = nil) {
+        self.rateGate = TransferRateGate(local: limiter, global: globalLimiter)
+        self.authorization = authorization
+        super.init()
+    }
     public func download(url: URL, destination: URL, workingDirectory: URL,
                          progress: @escaping @Sendable (Int64, Int64?) -> Void = { _, _ in }) async throws {
         try DownloadSafety.validate(url)
@@ -46,6 +53,7 @@ public final class DirectDownloader: NSObject, URLSessionDataDelegate, @unchecke
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        request.setValue(authorization?.header(for: url), forHTTPHeaderField: "Authorization")
         if offset > 0 {
             request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
             request.setValue(record?.validator, forHTTPHeaderField: "If-Range")
@@ -81,7 +89,9 @@ public final class DirectDownloader: NSObject, URLSessionDataDelegate, @unchecke
               !(response.url?.scheme?.lowercased() == "https" && url.scheme?.lowercased() != "https") else {
             failure = DownloadError.invalidURL; completionHandler(nil); return
         }
-        completionHandler(request)
+        var next = request
+        next.setValue(authorization?.header(for: url), forHTTPHeaderField: "Authorization")
+        completionHandler(next)
     }
     public func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
                            didReceive response: URLResponse,
@@ -140,6 +150,7 @@ public final class DirectDownloader: NSObject, URLSessionDataDelegate, @unchecke
     }
     public func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         do {
+            try rateGate.wait(data.count, cancelled: { self.lock.lock(); defer { self.lock.unlock() }; return self.cancelled })
             try handle?.write(contentsOf: data)
             received += Int64(data.count)
             if let expected, received > expected { throw DownloadError.invalidRange }

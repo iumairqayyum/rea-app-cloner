@@ -6,6 +6,15 @@
 <p>On a page you are authorized to download, enable this site and scan for media. No cookies are copied.</p>
 <button id="scan">Enable this site &amp; scan</button>
 <button id="refresh">Refresh observed media</button>
+<button id="floating">Show floating media control</button>
+<details><summary>Interception settings</summary>
+<p>Interception is off until you enable it for this site. Only known-size validated files pass these filters. Browser downloads resume if handoff fails.</p>
+<label>Extensions <input id="extensions" value="ZIP,RAR,EXE,DMG,MP4,MKV,ISO" aria-label="File extension allowlist"></label>
+<label>Minimum MiB <input id="minimum" type="number" min="0" max="10240" step="0.1" value="1"></label>
+<button id="saveSettings">Save filters</button>
+<button id="enableInterception">Enable interception for this site</button>
+<button id="disableInterception">Disable interception for this site</button>
+</details>
 <p id="status" role="status">Only URLs from this page are inspected. Start playback after scanning to observe media responses.</p>
 <ul id="candidates"></ul>
 <p class="note">MP4 is preferred only for sources with the same media element and explicit quality. TS segments are not complete videos. DRM and encrypted HLS are unsupported.</p>

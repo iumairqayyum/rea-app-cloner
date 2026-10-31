@@ -7,17 +7,19 @@ final class HTTPDownloadTests: XCTestCase {
     private let body = Data((0..<262144).map { UInt8($0 % 251) })
     private final class Server {
         let root: URL
-        let process: Process
+        let reaper: ChildProcessReaper
         let url: URL
         init(mode: String) async throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             let ready = root.appendingPathComponent("port")
-            process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            let process = Process()
+            guard let python = ["/usr/bin/python3", "/usr/local/bin/python3", "/opt/homebrew/bin/python3"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { throw DownloadError.transport }
+            process.executableURL = URL(fileURLWithPath: python)
             let script = #"""
 import http.server,sys,time,pathlib,signal
 signal.pthread_sigmask(signal.SIG_UNBLOCK,{signal.SIGTERM})
+signal.signal(signal.SIGTERM,signal.SIG_DFL)
 mode=sys.argv[2]
 data=bytes(i%251 for i in range(262144))
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -47,21 +49,22 @@ server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
 pathlib.Path(sys.argv[1]).write_text(str(server.server_port))
 server.serve_forever()
 """#
-            process.arguments = ["python3", "-u", "-c", script, ready.path, mode]
+            process.arguments = ["-u", "-c", script, ready.path, mode]
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
-            try process.run()
+            reaper = try ChildProcessReaper(process)
             var port: Int?
-            for _ in 0..<100 {
+            let deadline = Date().addingTimeInterval(15)
+            while Date() < deadline {
                 port = (try? String(contentsOf: ready)).flatMap(Int.init)
                 if port != nil { break }
                 try await Task.sleep(nanoseconds: 20_000_000)
             }
-            guard let port else { process.terminate(); throw DownloadError.transport }
+            guard let port else { reaper.terminate(); throw DownloadError.transport }
             url = URL(string: "http://127.0.0.1:\(port)/video.mp4")!
         }
         deinit {
-            if process.isRunning { process.terminate(); process.waitUntilExit() }
+            reaper.terminate()
             try? FileManager.default.removeItem(at: root)
         }
     }

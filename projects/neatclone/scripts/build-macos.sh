@@ -6,8 +6,10 @@ if [[ "$(uname -s)" != Darwin ]]; then
   exit 78
 fi
 export MACOSX_DEPLOYMENT_TARGET=12.0
-swift build -c release --arch x86_64 -j 2
-bin_dir="$(swift build -c release --arch x86_64 --show-bin-path)"
+build_arch="${NEATCLONE_ARCH:-x86_64}"
+case "$build_arch" in x86_64|arm64) ;; *) echo 'Choose x86_64 or arm64.' >&2; exit 2 ;; esac
+swift build -c release --arch "$build_arch" -j 2
+bin_dir="$(swift build -c release --arch "$build_arch" --show-bin-path)"
 app="$PWD/dist/NeatClone.app"
 mkdir -p "$app/Contents/MacOS"
 cp "$bin_dir/NeatClone" "$app/Contents/MacOS/NeatClone"
@@ -20,8 +22,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>NeatClone</string>
 <key>CFBundleExecutable</key><string>NeatClone</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
+<key>CFBundleVersion</key><string>2</string>
 <key>LSMinimumSystemVersion</key><string>12.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>
@@ -31,4 +33,4 @@ PLIST
 codesign --force --sign - "$app/Contents/MacOS/NeatCloneBridge"
 codesign --force --sign - "$app"
 codesign --verify --strict "$app"
-echo "Built Intel application: $app (local ad-hoc signature; not notarized)"
+echo "Built $build_arch application: $app (local ad-hoc signature; not notarized)"

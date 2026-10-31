@@ -16,6 +16,34 @@ public struct DownloadJob: Codable, Identifiable, Sendable {
     public var total: Int64? = nil
     public var error: String? = nil
     public var speed: Double = 0
+    public var activeConnections: Int = 0
+    public var queueID: UUID? = nil
+    public var eta: TimeInterval? {
+        guard kind == .direct, speed > 0, let total, total >= bytes else { return nil }
+        return Double(total - bytes) / speed
+    }
+    public init(id: UUID, url: URL, kind: DownloadKind, fileName: String, destination: URL,
+                status: DownloadStatus, bytes: Int64 = 0, total: Int64? = nil,
+                error: String? = nil, speed: Double = 0, activeConnections: Int = 0, queueID: UUID? = nil) {
+        self.id = id; self.url = url; self.kind = kind; self.fileName = fileName
+        self.destination = destination; self.status = status; self.bytes = bytes
+        self.total = total; self.error = error; self.speed = speed
+        self.activeConnections = activeConnections; self.queueID = queueID
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, url, kind, fileName, destination, status, bytes, total, error, speed, activeConnections, queueID
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id); url = try c.decode(URL.self, forKey: .url)
+        kind = try c.decode(DownloadKind.self, forKey: .kind); fileName = try c.decode(String.self, forKey: .fileName)
+        destination = try c.decode(URL.self, forKey: .destination); status = try c.decode(DownloadStatus.self, forKey: .status)
+        bytes = try c.decodeIfPresent(Int64.self, forKey: .bytes) ?? 0
+        total = try c.decodeIfPresent(Int64.self, forKey: .total); error = try c.decodeIfPresent(String.self, forKey: .error)
+        speed = try c.decodeIfPresent(Double.self, forKey: .speed) ?? 0
+        activeConnections = try c.decodeIfPresent(Int.self, forKey: .activeConnections) ?? 0
+        queueID = try c.decodeIfPresent(UUID.self, forKey: .queueID)
+    }
     public var progress: Double? { total.flatMap { $0 > 0 ? min(1, Double(bytes) / Double($0)) : nil } }
 }
 public enum DownloadError: Error, Equatable, LocalizedError {
@@ -24,7 +52,9 @@ public enum DownloadError: Error, Equatable, LocalizedError {
         switch self {
         case .invalidURL: return "Use an HTTP or HTTPS URL without embedded credentials. TS segments are not full videos."
         case .unsafeDestination: return "Choose a writable destination directory."
-        case .http(let code): return "Server returned HTTP \(code). Renew the authorized URL if it expired."
+        case .http(let code):
+            if code == 403 { return "Server refused this request (HTTP 403). Check its published access or size limits; NeatClone will not bypass the denial." }
+            return "Server returned HTTP \(code). Renew the authorized URL if it expired."
         case .invalidRange: return "The server returned an inconsistent byte range; retry from the beginning."
         case .incomplete: return "The response ended before all expected bytes arrived."
         case .localIO: return "Cannot write the download or queue state. Check disk space and permissions."
