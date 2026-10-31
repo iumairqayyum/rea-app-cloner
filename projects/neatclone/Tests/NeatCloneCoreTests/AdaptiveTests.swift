@@ -17,15 +17,17 @@ final class AdaptiveTests: XCTestCase {
 import http.server,sys,time,pathlib,signal,os
 signal.pthread_sigmask(signal.SIG_UNBLOCK,{signal.SIGTERM})
 signal.signal(signal.SIGTERM,signal.SIG_DFL)
-root=pathlib.Path(sys.argv[1]);data=bytes(i%251 for i in range(int(sys.argv[2])))
+root=pathlib.Path(sys.argv[1]);size=int(sys.argv[2])
 class Handler(http.server.BaseHTTPRequestHandler):
  def log_message(self,*a):pass
  def do_GET(self):
-  content=bytes(x^255 for x in data) if self.path.startswith('/evil') else data
-  r=self.headers.get('Range');start=0;end=len(data)-1;status=200
+  r=self.headers.get('Range');start=0;end=size-1;status=200
   if r and not self.path.startswith('/ignore'):
-   a,b=r.split('=')[1].split('-');start=int(a);end=int(b) if b else len(data)-1;status=206
+   a,b=r.split('=')[1].split('-');start=int(a);end=int(b) if b else size-1;status=206
   with (root/'requests').open('a') as f:f.write(f'{self.path} {start}-{end} {status}\n')
+  if self.path.startswith('/forbidden'):
+   self.send_response(403);self.send_header('Content-Length','1');self.end_headers();self.wfile.write(b'x');return
+  if self.path.startswith('/badfull') and not r:status=206
   if self.path.startswith('/retry') and end>0:
    try:
     fd=os.open(root/'retried',os.O_CREAT|os.O_EXCL|os.O_WRONLY);os.close(fd)
@@ -33,12 +35,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
    except FileExistsError:pass
   self.send_response(status);self.send_header('ETag','"stable"');self.send_header('Content-Length',str(end-start+1));self.send_header('Content-Type','application/octet-stream')
   if status==206:
-   advertised=start+1 if self.path.startswith('/bad') and end>0 else start
-   self.send_header('Content-Range',f'bytes {advertised}-{end}/{len(data)}')
+   advertised=start+1 if self.path.split('?',1)[0] in ('/bad','/badfull') or (self.path.startswith('/badlater') and end>0) else start
+   self.send_header('Content-Range',f'bytes {advertised}-{end}/{size}')
   self.end_headers()
   try:
    for index in range(start,end+1,16384):
-    self.wfile.write(content[index:min(index+16384,end+1)]);self.wfile.flush();time.sleep(.002)
+    stop=min(index+16384,end+1)
+    chunk=bytes(((i%251)^255 if self.path.startswith('/evil') else i%251) for i in range(index,stop))
+    self.wfile.write(chunk);self.wfile.flush();time.sleep(.002)
   except (BrokenPipeError,ConnectionResetError):pass
 server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
 (root/'port').write_text(str(server.server_port));server.serve_forever()
@@ -82,18 +86,41 @@ server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
         let final = server.root.appendingPathComponent("fallback")
         try await AdaptiveDownloader().download(url: server.url("ignore"), destination: final, workingDirectory: server.root.appendingPathComponent("work"))
         XCTAssertEqual(try Data(contentsOf: final), server.body)
+        let fallbackConnections = Connections()
+        let recovered = server.root.appendingPathComponent("bad-range-recovered")
+        try await AdaptiveDownloader(options: TransferOptions(maxConnections: 8)).download(url: server.url("badlater"), destination: recovered,
+            workingDirectory: server.root.appendingPathComponent("bad-range-work"), onConnections: { fallbackConnections.observe($0) })
+        XCTAssertEqual(try Data(contentsOf: recovered), server.body)
+        XCTAssertEqual(fallbackConnections.max, 1, "A malformed range response must fall back to one validated streaming request")
+        let fallbackRequests = try String(contentsOf: server.root.appendingPathComponent("requests"))
+            .components(separatedBy: .newlines).filter { $0.contains("/badlater") }
+        XCTAssertGreaterThanOrEqual(fallbackRequests.count, 3, "Probe and rejected ranges must be followed by a fresh stream")
+        XCTAssertTrue(fallbackRequests.contains(where: { $0.hasSuffix("206") }))
+        XCTAssertTrue(fallbackRequests.last?.hasSuffix("200") == true)
         let bad = server.root.appendingPathComponent("bad-result")
         do {
-            try await AdaptiveDownloader().download(url: server.url("bad"), destination: bad, workingDirectory: server.root.appendingPathComponent("bad-work"))
+            try await AdaptiveDownloader().download(url: server.url("badfull"), destination: bad, workingDirectory: server.root.appendingPathComponent("bad-work"))
             XCTFail("Range mismatch must not commit")
         } catch { XCTAssertEqual(error as? DownloadError, .invalidRange) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: bad.path))
+    }
+    func testHTTP403IsSurfacedAndNeverCreatesOutput() async throws {
+        let server = try await Server(size: 100_000_000)
+        let destination = server.root.appendingPathComponent("forbidden.bin")
+        do {
+            try await AdaptiveDownloader().download(url: server.url("forbidden"), destination: destination,
+                workingDirectory: server.root.appendingPathComponent("forbidden-work"))
+            XCTFail("HTTP 403 must remain a server refusal")
+        } catch { XCTAssertEqual(error as? DownloadError, .http(403)) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        let requests = try String(contentsOf: server.root.appendingPathComponent("requests"))
+        XCTAssertEqual(requests.components(separatedBy: .newlines).filter { !$0.isEmpty }.count, 1, "A permanent 403 must not trigger a sequential retry")
     }
     func testCheckpointResumeAndRefreshRejectsSameValidatorDifferentContent() async throws {
         let server = try await Server()
         let work = server.root.appendingPathComponent("partial"), final = server.root.appendingPathComponent("resumed")
         let original = server.url()
-        let task = Task { try await AdaptiveDownloader(options: TransferOptions(maxConnections: 3, bytesPerSecond: 524_288)).download(url: original, destination: final, workingDirectory: work) }
+        let task = Task { try await AdaptiveDownloader(options: TransferOptions(maxConnections: 3, bytesPerSecond: 1_048_576)).download(url: original, destination: final, workingDirectory: work) }
         let manifest = work.appendingPathComponent("ranges.json")
         for _ in 0..<200 {
             if FileManager.default.fileExists(atPath: manifest.path) { break }
@@ -122,7 +149,7 @@ server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
     func testResumeDetectsCorruptedCachedQuantum() async throws {
         let server = try await Server()
         let work = server.root.appendingPathComponent("corrupt-work"), destination = server.root.appendingPathComponent("corrected")
-        let task = Task { try await AdaptiveDownloader(options: TransferOptions(maxConnections: 2, bytesPerSecond: 524_288)).download(url: server.url(), destination: destination, workingDirectory: work) }
+        let task = Task { try await AdaptiveDownloader(options: TransferOptions(maxConnections: 2, bytesPerSecond: 1_048_576)).download(url: server.url(), destination: destination, workingDirectory: work) }
         for _ in 0..<200 {
             if FileManager.default.fileExists(atPath: work.appendingPathComponent("ranges.json").path) { break }
             try await Task.sleep(nanoseconds: 10_000_000)
@@ -173,5 +200,44 @@ server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
         XCTAssertGreaterThanOrEqual(elapsed, 1.8); XCTAssertLessThan(elapsed, 4.5)
         XCTAssertEqual(try Data(contentsOf: server.root.appendingPathComponent("one")), server.body)
         XCTAssertEqual(try Data(contentsOf: server.root.appendingPathComponent("two")), server.body)
+    }
+    func test100MBStreamResumesWithBoundedRangesAndExactSize() async throws {
+        let size = 100_000_000
+        let server = try await Server(size: size)
+        let destination = server.root.appendingPathComponent("large.bin")
+        let work = server.root.appendingPathComponent("large-work")
+        let firstPass = Task {
+            try await AdaptiveDownloader(options: TransferOptions(maxConnections: 8, bytesPerSecond: 1_048_576)).download(
+                url: server.url(), destination: destination, workingDirectory: work)
+        }
+        let manifest = work.appendingPathComponent("ranges.json")
+        var hasCheckpoint = false
+        for _ in 0..<600 {
+            if let data = try? Data(contentsOf: manifest),
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let completed = object["completed"] as? [Int], !completed.isEmpty { hasCheckpoint = true; break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(hasCheckpoint, "Large transfer should persist a validated range before interruption")
+        firstPass.cancel()
+        do { try await firstPass.value; XCTFail("First pass should be cancelled") } catch { }
+
+        let connections = Connections()
+        try await AdaptiveDownloader(options: TransferOptions(maxConnections: 8)).download(url: server.url(), destination: destination,
+            workingDirectory: work, onConnections: { connections.observe($0) })
+        let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
+        XCTAssertEqual((attributes[.size] as? NSNumber)?.int64Value, Int64(size))
+        XCTAssertGreaterThan(connections.max, 1)
+        XCTAssertLessThanOrEqual(connections.max, 8)
+        let handle = try FileHandle(forReadingFrom: destination); defer { try? handle.close() }
+        var offsets = Array(stride(from: 0, to: size, by: 8 * 1024 * 1024))
+        offsets.append(size - 65_536)
+        for offset in Set(offsets) {
+            let count = min(65_536, size - offset)
+            try handle.seek(toOffset: UInt64(offset))
+            let actual = try XCTUnwrap(handle.read(upToCount: count))
+            let expected = Data((offset..<(offset + count)).map { UInt8($0 % 251) })
+            XCTAssertEqual(actual, expected, "Resumed content mismatch at byte \(offset)")
+        }
     }
 }

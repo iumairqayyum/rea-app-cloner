@@ -32,12 +32,23 @@ import XCTest
         XCTAssertTrue(NSApp.sendAction(Selector(("copy:")), to: nil, from: nil)); XCTAssertEqual(NSPasteboard.general.string(forType: .string), "one.mp4\ntwo.mp4")
         window.orderOut(nil)
     }
+    func testDeleteKeyRequestsRemoveFromHistory() async throws {
+        let table = DownloadTableView(frame: NSRect(x: 0, y: 0, width: 300, height: 120))
+        var invoked = false; table.removeSelection = { invoked = true }
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, characters: "\u{7f}", charactersIgnoringModifiers: "\u{7f}", isARepeat: false, keyCode: 51))
+        table.keyDown(with: event)
+        XCTAssertTrue(invoked, "The Delete key must remove selected rows from the list")
+    }
     func testPreferencesRoundTripWithoutStoringCredentials() async throws {
         let name = "org.neatclone.ui-test-\(UUID().uuidString)"; let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
         var settings = AppSettings(defaults: defaults); XCTAssertEqual(settings.maxConnections, 8)
         settings.maxConnections = 16; settings.globalBytesPerSecond = try AppSettings.rateFromKiB("2048"); settings.save(to: defaults)
         XCTAssertEqual(AppSettings(defaults: defaults), settings)
+        settings.maxConnections = 1; settings.save(to: defaults)
+        XCTAssertEqual(AppSettings(defaults: defaults).maxConnections, 1, "Single-connection mode must remain configurable")
+        XCTAssertEqual(AppSettings.connectionChoices, Array(1...32))
         XCTAssertNil(defaults.object(forKey: "password"))
     }
 }

@@ -2,7 +2,7 @@ import Foundation
 
 /// Non-secret preferences only. Credentials belong to the platform Keychain adapter.
 struct AppSettings: Equatable {
-    static let connectionChoices = [2, 4, 8, 16, 24, 32]
+    static let connectionChoices = Array(1...32)
     var maxConnections: Int = 8
     var perDownloadBytesPerSecond: Int64? = nil
     var globalBytesPerSecond: Int64? = nil

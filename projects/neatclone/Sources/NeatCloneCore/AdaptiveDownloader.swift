@@ -130,6 +130,12 @@ public struct AdaptiveDownloader {
         do { identity = try await Self.probe(url, authorization: authorization) }
         catch {
             if error is CancellationError || Task.isCancelled { throw CancellationError() }
+            if let transferError = error as? DownloadError, case .http(let status) = transferError,
+               status < 500 && status != 408 && status != 416 && status != 429 {
+                // Permanent HTTP denials are authoritative. Do not retry them
+                // through another transfer mode or obscure the server status.
+                throw transferError
+            }
             // A failed probe is not license to append partial range bytes. The
             // sequential downloader revalidates/restarts its own independent file.
             onConnections(1); defer { onConnections(0) }
@@ -139,7 +145,22 @@ public struct AdaptiveDownloader {
         }
         let coordinator = try RangeCoordinator(identity: identity, directory: workingDirectory, destination: destination,
             options: options, globalLimiter: globalLimiter, authorization: authorization, progress: progress, onConnections: onConnections)
-        try await coordinator.run()
+        do {
+            try await coordinator.run()
+        } catch {
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
+            guard let transferError = error as? DownloadError,
+                  transferError == .invalidRange || transferError == .incomplete || transferError == .transport || transferError == .http(416) else {
+                throw error
+            }
+            // A server can advertise ranges in its probe then reject or corrupt
+            // a later range. Retry safely as a fresh, streaming single request;
+            // DirectDownloader never appends a 200 response to partial bytes.
+            onConnections(1)
+            defer { onConnections(0) }
+            try await DirectDownloader(limiter: ByteRateLimiter(rate: options.bytesPerSecond), globalLimiter: globalLimiter, authorization: authorization)
+                .download(url: url, destination: destination, workingDirectory: workingDirectory, progress: progress)
+        }
     }
     private static func probe(_ url: URL, authorization: TransferAuthorization?) async throws -> RangeIdentity {
         let (_, response) = try await RangeRead(start: 0, end: 0, identity: nil, authorization: authorization).run(url)
@@ -210,6 +231,7 @@ private actor RangeCoordinator {
     var active = 0
     var ceiling: Int
     var successful = 0
+    var completedSinceCheckpoint: Int64 = 0
     var desiredQuanta = 8
     var attempts: [Int64: Int] = [:]
     var nextQuantum: Int64 = 0
@@ -271,11 +293,19 @@ private actor RangeCoordinator {
     func run() async throws {
         defer { try? file.close(); onConnections(0) }
         progress(received, identity.total)
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            for _ in 0..<ceiling {
-                group.addTask { try await self.worker() }
+        do {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for _ in 0..<ceiling {
+                    group.addTask { try await self.worker() }
+                }
+                try await group.waitForAll()
             }
-            try await group.waitForAll()
+        } catch {
+            // Child workers have stopped before this scope exits. Persist every
+            // fully written quantum on pause/failure; uncompleted bytes remain
+            // untrusted and will be fetched again on resume.
+            if completedSinceCheckpoint > 0 { try saveCheckpoint() }
+            throw error
         }
         try Task.checkCancellation()
         guard checkpoint.completed.count == Int(quantumCount) else { throw DownloadError.incomplete }
@@ -309,7 +339,9 @@ private actor RangeCoordinator {
                     checkpoint.completed.insert(index); inFlight.remove(index)
                 }
                 active -= 1; released = true
-                try saveCheckpoint(); progress(received, identity.total)
+                completedSinceCheckpoint += last - first + 1
+                if completedSinceCheckpoint >= 16 || checkpoint.completed.count == Int(quantumCount) { try saveCheckpoint() }
+                progress(received, identity.total)
                 // Slow requests are resegmented into the minimum quantum on the
                 // next assignment; fast workers grow to a bounded 512 KiB read.
                 desiredQuanta = ProcessInfo.processInfo.systemUptime - began > 1 ? 1 : min(8, desiredQuanta + 1)
@@ -341,5 +373,6 @@ private actor RangeCoordinator {
         let path = directory.appendingPathComponent("ranges.json")
         try JSONEncoder().encode(checkpoint).write(to: path, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
+        completedSinceCheckpoint = 0
     }
 }

@@ -23,6 +23,42 @@ final class DownloadTests: XCTestCase {
         XCTAssertNil(DirectDownloader.parseRange("bytes 10-19/20 trailing"))
         XCTAssertNil(DirectDownloader.parseRange("bytes */20"))
     }
+    func testNewestFirstAndStableColumnSorting() {
+        let url = URL(string: "https://example.org/file")!
+        let jobs = [
+            DownloadJob(id: UUID(), url: url, kind: .direct, fileName: "zeta.bin", destination: URL(fileURLWithPath: "/tmp/z"), status: .queued, bytes: 5),
+            DownloadJob(id: UUID(), url: url, kind: .direct, fileName: "Alpha.bin", destination: URL(fileURLWithPath: "/tmp/a"), status: .queued, bytes: 5),
+            DownloadJob(id: UUID(), url: url, kind: .direct, fileName: "middle.bin", destination: URL(fileURLWithPath: "/tmp/m"), status: .queued, bytes: 1)
+        ]
+        XCTAssertEqual(DownloadOrdering.sorted(jobs).map(\.id), jobs.reversed().map(\.id))
+        XCTAssertEqual(DownloadOrdering.sorted(jobs, key: "file", ascending: true).map(\.fileName), ["Alpha.bin", "middle.bin", "zeta.bin"])
+        XCTAssertEqual(DownloadOrdering.sorted(jobs, key: "bytes", ascending: true).map(\.fileName), ["middle.bin", "Alpha.bin", "zeta.bin"])
+        XCTAssertEqual(Array(DownloadOrdering.sorted(jobs, key: "bytes", ascending: false).map(\.id).prefix(2)), [jobs[1].id, jobs[0].id])
+    }
+    @MainActor func testRemoveFromListPreservesFileAndConfirmedDeleteRemovesIt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let state = root.appendingPathComponent("queue.json")
+        let output = root.appendingPathComponent("keep.bin")
+        try Data("keep".utf8).write(to: output)
+        let keepID = UUID()
+        let kept = DownloadJob(id: keepID, url: URL(string: "https://example.org/keep")!, kind: .direct,
+            fileName: "keep.bin", destination: output, status: .paused)
+        let deleteURL = root.appendingPathComponent("delete.bin")
+        try Data("delete".utf8).write(to: deleteURL)
+        let deleteID = UUID()
+        let complete = DownloadJob(id: deleteID, url: URL(string: "https://example.org/delete")!, kind: .direct,
+            fileName: "delete.bin", destination: deleteURL, status: .completed)
+        try JSONEncoder().encode([kept, complete]).write(to: state)
+        let queue = try DownloadQueue(stateURL: state)
+        try queue.removeFromList(keepID)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.path))
+        XCTAssertFalse(queue.jobs.contains(where: { $0.id == keepID }))
+        try queue.removeFromList(deleteID, deleteFile: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: deleteURL.path))
+        XCTAssertFalse(queue.jobs.contains(where: { $0.id == deleteID }))
+    }
     @MainActor func testInterruptedQueueRecoveryAndInboxIdempotence() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

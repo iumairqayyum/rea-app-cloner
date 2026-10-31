@@ -1,0 +1,23 @@
+NeatClone Intel developer build — macOS Monterey 12 or later
+
+1. Unzip this package. Move NeatClone.app to /Applications and open it. The
+   app is locally ad-hoc signed, not notarized; use Finder's Open action if
+   macOS asks you to approve this developer build. Do not disable Gatekeeper.
+2. In Chrome, open chrome://extensions, enable Developer mode, and choose
+   Load unpacked. Select the extension folder next to this file and copy its
+   extension ID from the page.
+3. In Terminal, from this unzipped folder, register that exact ID:
+
+   python3 ./register-native-host.py --app /Applications/NeatClone.app --extension-id YOUR_EXTENSION_ID
+
+4. Reload the extension in Chrome. Visit an authorized page, approve its site
+   permission, scan, choose an actual MP4 or supported HLS playlist, then send
+   it to NeatClone. Browser cookies and login sessions are never transferred.
+5. For manual HLS downloads, install FFmpeg from a source you trust. Only
+   authorized, unencrypted VOD playlists are supported; DRM and encrypted HLS
+   are refused.
+
+The queue and settings are stored in ~/Library/Application Support/NeatClone.
+Downloads use the destination shown in the app. This is a developer build, not
+a notarized consumer installer. See the repository README for security scope,
+removal steps, and current integration limitations.

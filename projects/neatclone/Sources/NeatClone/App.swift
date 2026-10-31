@@ -11,9 +11,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
     private let urlField = NSTextField()
     private let filenameField = NSTextField()
     private let search = NSSearchField()
-    private let filter = NSPopUpButton()
     private let message = NSTextField(labelWithString: "Ready. Add an authorized URL or send one from Chrome.")
     private let folderLabel = NSTextField(labelWithString: "")
+    private let sidebar = NSVisualEffectView()
+    private var sidebarButtons: [NSButton] = []
+    private var selectedFilterTag = 0
+    private let heading = NSTextField(labelWithString: "Downloads")
+    private let subheading = NSTextField(labelWithString: "Newest first")
     private let hls = NSButton(checkboxWithTitle: "Unencrypted HLS → MP4", target: nil, action: nil)
     private var inboxTimer: Timer?
     private var settings = AppSettings(defaults: .standard)
@@ -40,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
             if Self.smokeOutput != nil { settings = AppSettings(); destination = support.appendingPathComponent("Downloads") }
             if let path = settings.destination { destination = URL(fileURLWithPath: path, isDirectory: true) }
             let ffmpeg = ["/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg"].first { FileManager.default.isExecutableFile(atPath: $0) }.map { URL(fileURLWithPath: $0) }
+            if Self.smokeOutput != nil { try installUISmokeFixtures() }
             queue = try DownloadQueue(stateURL: support.appendingPathComponent("queue.json"), ffmpegURL: ffmpeg)
             platform = MacIntegration(queue: queue)
             createWindow()
@@ -69,7 +74,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
         let clipboard = NSPasteboard.general.string(forType: .string)
         do {
             try UIVerification.verifyMenus(NSApp.mainMenu!)
+            try UIVerification.require(sidebarButtons.count == 7, "The download sidebar is incomplete")
+            try UIVerification.require(table.allowsMultipleSelection && table.numberOfRows == 3, "The download table is missing multi-selection or sample history")
+            try UIVerification.verifyDownloadMenu(table.menu)
+            try UIVerification.require(displayed.first?.fileName == "Archive part 01.bin", "Default history order is not newest first")
+            sidebarButtons[4].performClick(nil)
+            try UIVerification.require(displayed.count == 1 && displayed.first?.status == .completed, "Sidebar status filter did not update history")
+            sidebarButtons[0].performClick(nil)
+            table.sortDescriptors = [NSSortDescriptor(key: "file", ascending: true)]; reloadGrid()
+            try UIVerification.require(displayed.first?.fileName == "Archive part 01.bin" && displayed.last?.fileName == "Sample video.mp4", "Filename column sorting did not apply")
+            table.sortDescriptors = []; reloadGrid()
             try UIVerification.verifyTextField(urlField, in: window)
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString("https://example.test/pasted.mp4", forType: .string)
+            try UIVerification.require(window.makeFirstResponder(urlField), "Cannot focus URL field for Paste")
+            try UIVerification.require(NSApp.sendAction(Selector(("paste:")), to: nil, from: nil), "Cmd+V did not reach the URL field")
+            try UIVerification.require(urlField.stringValue == "https://example.test/pasted.mp4", "URL field Paste changed the clipboard text")
             try UIVerification.verifyTextField(filenameField, in: window)
             urlField.stringValue = ""; filenameField.stringValue = ""
             showSettings(nil)
@@ -98,60 +117,96 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
         let result = NSButton(title: title, target: self, action: action); result.bezelStyle = .rounded
         result.setAccessibilityLabel(title); return result
     }
+    private func installUISmokeFixtures() throws {
+        let now = URL(string: "https://example.test/video.mp4")!
+        let files = [
+            DownloadJob(id: UUID(), url: now, kind: .direct, fileName: "Sample video.mp4", destination: destination.appendingPathComponent("Sample video.mp4"), status: .paused, bytes: 46_000_000, total: 100_000_000, activeConnections: 0),
+            DownloadJob(id: UUID(), url: URL(string: "https://example.test/installer.dmg")!, kind: .direct, fileName: "Developer tools.dmg", destination: destination.appendingPathComponent("Developer tools.dmg"), status: .completed, bytes: 24_000_000, total: 24_000_000),
+            DownloadJob(id: UUID(), url: URL(string: "https://example.test/large.bin")!, kind: .direct, fileName: "Archive part 01.bin", destination: destination.appendingPathComponent("Archive part 01.bin"), status: .failed, bytes: 0, total: 100_000_000, error: DownloadError.http(403).errorDescription)
+        ]
+        try JSONEncoder().encode(files).write(to: support.appendingPathComponent("queue.json"), options: .atomic)
+    }
     private func createWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1260, height: 720), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1260, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.title = "NeatClone — Download Manager"; window.minSize = NSSize(width: 960, height: 540)
+        window.title = "NeatClone — Download Manager"; window.minSize = NSSize(width: 840, height: 540)
         window.setFrameAutosaveName("NeatClone.MainWindow")
         let toolbar = NSToolbar(identifier: "NeatClone.Toolbar"); toolbar.delegate = self
         toolbar.displayMode = .iconAndLabel; toolbar.allowsUserCustomization = true; toolbar.autosavesConfiguration = true
         window.toolbar = toolbar; window.toolbarStyle = .expanded
+        sidebar.material = .sidebar; sidebar.blendingMode = .behindWindow; sidebar.state = .followsWindowActiveState
+        let sidebarTitle = NSTextField(labelWithString: "LIBRARY")
+        sidebarTitle.font = .systemFont(ofSize: 11, weight: .bold); sidebarTitle.textColor = .tertiaryLabelColor
+        let labels = ["All Downloads", "Downloading", "Queued", "Paused", "Completed", "Failed", "Cancelled"]
+        let symbols = ["tray.full", "arrow.down.circle.fill", "clock", "pause.circle", "checkmark.circle.fill", "exclamationmark.circle.fill", "xmark.circle"]
+        sidebarButtons = labels.enumerated().map { index, title in
+            let item = NSButton(title: title, image: NSImage(systemSymbolName: symbols[index], accessibilityDescription: title), target: self, action: #selector(selectSidebarFilter(_:)))
+            item.setButtonType(.toggle); item.bezelStyle = .rounded; item.imagePosition = .imageLeading; item.alignment = .left; item.tag = index
+            item.setAccessibilityLabel("Show \(title)"); return item
+        }
+        let sideStack = NSStackView(views: [sidebarTitle] + sidebarButtons)
+        sideStack.orientation = .vertical; sideStack.alignment = .leading; sideStack.spacing = 8; sideStack.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.addSubview(sideStack)
+        NSLayoutConstraint.activate([sideStack.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 14), sideStack.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -14), sideStack.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 22)])
+
         urlField.placeholderString = "https://example.com/video.mp4"; urlField.setAccessibilityLabel("Download URL")
         filenameField.placeholderString = "Optional file name"; filenameField.setAccessibilityLabel("File name")
         urlField.target = self; urlField.action = #selector(addDownload(_:))
-        let inputs = NSStackView(views: [urlField, filenameField, hls, button("Add to queue", #selector(addDownload(_:)))]); inputs.spacing = 8
-        urlField.widthAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
-        filenameField.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        urlField.font = .systemFont(ofSize: 14); filenameField.font = .systemFont(ofSize: 13)
+        let addButton = button("Add Download", #selector(addDownload(_:))); addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add download"); addButton.imagePosition = .imageLeading
+        let addressRow = NSStackView(views: [urlField, addButton]); addressRow.spacing = 10; addressRow.distribution = .fill
+        urlField.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
+        let detailsRow = NSStackView(views: [filenameField, hls]); detailsRow.spacing = 12; detailsRow.distribution = .fill
+        filenameField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
         folderLabel.stringValue = destination.path; folderLabel.lineBreakMode = .byTruncatingMiddle
-        folderLabel.setAccessibilityLabel("Download destination")
-        let folder = NSStackView(views: [NSTextField(labelWithString: "Save to:"), folderLabel, button("Choose…", #selector(chooseFolder(_:)))]); folder.spacing = 8
-        filter.addItems(withTitles: ["All downloads", "Downloading", "Queued", "Paused", "Completed", "Failed", "Cancelled"])
-        filter.target = self; filter.action = #selector(filterChanged(_:)); filter.setAccessibilityLabel("Filter by status")
+        folderLabel.setAccessibilityLabel("Download destination"); folderLabel.font = .systemFont(ofSize: 12); folderLabel.textColor = .secondaryLabelColor
+        let folder = NSStackView(views: [NSTextField(labelWithString: "Save to"), folderLabel, button("Choose…", #selector(chooseFolder(_:)))]); folder.spacing = 10
+        let inputs = NSStackView(views: [addressRow, detailsRow, folder]); inputs.orientation = .vertical; inputs.alignment = .leading; inputs.spacing = 10
+        inputs.translatesAutoresizingMaskIntoConstraints = false
+        let inputCard = NSVisualEffectView(); inputCard.material = .contentBackground; inputCard.blendingMode = .withinWindow; inputCard.state = .followsWindowActiveState
+        inputCard.wantsLayer = true; inputCard.layer?.cornerRadius = 10; inputCard.layer?.masksToBounds = true; inputCard.addSubview(inputs)
+        NSLayoutConstraint.activate([inputs.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 14), inputs.trailingAnchor.constraint(equalTo: inputCard.trailingAnchor, constant: -14), inputs.topAnchor.constraint(equalTo: inputCard.topAnchor, constant: 12), inputs.bottomAnchor.constraint(equalTo: inputCard.bottomAnchor, constant: -12), addressRow.widthAnchor.constraint(equalTo: inputs.widthAnchor), detailsRow.widthAnchor.constraint(equalTo: inputs.widthAnchor), folder.widthAnchor.constraint(equalTo: inputs.widthAnchor)])
+
         search.placeholderString = "Find file name"; search.target = self; search.action = #selector(filterChanged(_:)); search.sendsSearchStringImmediately = true
         search.setAccessibilityLabel("Search downloads")
-        let filters = NSStackView(views: [filter, search]); filters.spacing = 8
-        search.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
-        let columns: [(String, String, CGFloat)] = [("file", "File name", 280), ("state", "Status", 130), ("progress", "Progress", 100), ("bytes", "Received / total", 160), ("speed", "Throughput", 120), ("eta", "ETA", 90), ("connections", "Connections", 100), ("queue", "Queue", 130)]
+        search.widthAnchor.constraint(greaterThanOrEqualToConstant: 210).isActive = true
+        heading.font = .systemFont(ofSize: 23, weight: .semibold); subheading.font = .systemFont(ofSize: 12); subheading.textColor = .secondaryLabelColor
+        let titleStack = NSStackView(views: [heading, subheading]); titleStack.orientation = .vertical; titleStack.alignment = .leading; titleStack.spacing = 3
+        let header = NSStackView(views: [titleStack, search]); header.orientation = .horizontal; header.alignment = .centerY; header.spacing = 18
+        let columns: [(String, String, CGFloat)] = [("file", "File name", 270), ("state", "Status", 125), ("progress", "Progress", 155), ("bytes", "Received / total", 150), ("speed", "Throughput", 112), ("eta", "ETA", 82), ("connections", "Connections", 100), ("queue", "Queue", 125)]
         for (key, title, width) in columns {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(key)); column.title = title; column.width = width; column.minWidth = 70
             column.sortDescriptorPrototype = NSSortDescriptor(key: key, ascending: true)
             table.addTableColumn(column)
         }
-        table.delegate = self; table.dataSource = self; table.rowHeight = 32; table.usesAlternatingRowBackgroundColors = true
+        table.delegate = self; table.dataSource = self; table.rowHeight = 42; table.usesAlternatingRowBackgroundColors = true
         table.allowsMultipleSelection = true; table.autosaveName = "NeatClone.Grid"; table.autosaveTableColumns = true
         table.setAccessibilityLabel("Download queue")
         table.copyText = { [weak self] in self?.selectedJobs().map { "\($0.fileName)\t\($0.status.rawValue)" }.joined(separator: "\n") ?? "" }
+        table.removeSelection = { [weak self] in self?.removeFromList(nil) }
         table.menu = contextMenu()
-        let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
-        message.lineBreakMode = .byWordWrapping; message.maximumNumberOfLines = 2
-        let root = NSStackView(views: [inputs, folder, filters, scroll, message]); root.orientation = .vertical; root.alignment = .leading; root.spacing = 12; root.translatesAutoresizingMaskIntoConstraints = false
-        let view = NSView(); window.contentView = view; view.addSubview(root)
+        table.backgroundColor = .clear; table.gridColor = .separatorColor; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.drawsBackground = false; scroll.borderType = .noBorder
+        message.lineBreakMode = .byWordWrapping; message.maximumNumberOfLines = 2; message.font = .systemFont(ofSize: 12); message.textColor = .secondaryLabelColor
+        let main = NSStackView(views: [header, inputCard, scroll, message]); main.orientation = .vertical; main.alignment = .leading; main.spacing = 16; main.translatesAutoresizingMaskIntoConstraints = false
+        let view = NSView(); view.wantsLayer = true; view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        window.contentView = view; view.addSubview(sidebar); view.addSubview(main)
         NSLayoutConstraint.activate([
-            root.topAnchor.constraint(equalTo: view.topAnchor, constant: 16), root.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16),
-            root.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16), root.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            inputs.widthAnchor.constraint(equalTo: root.widthAnchor), folder.widthAnchor.constraint(equalTo: root.widthAnchor), filters.widthAnchor.constraint(equalTo: root.widthAnchor),
-            scroll.widthAnchor.constraint(equalTo: root.widthAnchor), scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 260), message.widthAnchor.constraint(equalTo: root.widthAnchor)
+            sidebar.leadingAnchor.constraint(equalTo: view.leadingAnchor), sidebar.topAnchor.constraint(equalTo: view.topAnchor), sidebar.bottomAnchor.constraint(equalTo: view.bottomAnchor), sidebar.widthAnchor.constraint(equalToConstant: 184),
+            main.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: 22), main.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -22), main.topAnchor.constraint(equalTo: view.topAnchor, constant: 20), main.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -18),
+            header.widthAnchor.constraint(equalTo: main.widthAnchor), inputCard.widthAnchor.constraint(equalTo: main.widthAnchor), scroll.widthAnchor.constraint(equalTo: main.widthAnchor), scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 250), message.widthAnchor.constraint(equalTo: main.widthAnchor)
         ])
+        updateSidebarSelection()
         NSApp.mainMenu = UIMenus.make(target: self)
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [NSToolbarItem.Identifier("add"), NSToolbarItem.Identifier("resume"), NSToolbarItem.Identifier("pause"),
+        [NSToolbarItem.Identifier("add"), NSToolbarItem.Identifier("resume"), NSToolbarItem.Identifier("pause"), NSToolbarItem.Identifier("remove"),
          .flexibleSpace, NSToolbarItem.Identifier("queue"), NSToolbarItem.Identifier("settings")]
     }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) + [.space] }
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        let choices: [String: (String, String, Selector)] = ["add": ("Add URL", "plus", #selector(focusURL(_:))), "resume": ("Start / Resume", "play.fill", #selector(resume(_:))), "pause": ("Pause", "pause.fill", #selector(pause(_:))), "queue": ("Queue", "list.bullet", #selector(showScheduler(_:))), "settings": ("Settings", "gearshape", #selector(showSettings(_:)))]
+        let choices: [String: (String, String, Selector)] = ["add": ("Add URL", "plus", #selector(focusURL(_:))), "resume": ("Start / Resume", "play.fill", #selector(resume(_:))), "pause": ("Pause", "pause.fill", #selector(pause(_:))), "remove": ("Remove from List", "trash", #selector(removeFromList(_:))), "queue": ("Queue", "list.bullet", #selector(showScheduler(_:))), "settings": ("Settings", "gearshape", #selector(showSettings(_:)))]
         guard let choice = choices[identifier.rawValue] else { return nil }
         let item = NSToolbarItem(itemIdentifier: identifier); item.label = choice.0; item.paletteLabel = choice.0
         item.image = NSImage(systemSymbolName: choice.1, accessibilityDescription: choice.0); item.target = self; item.action = choice.2; item.isEnabled = true
@@ -159,7 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
     }
     private func contextMenu() -> NSMenu {
         let menu = NSMenu(title: "Downloads"); menu.autoenablesItems = false
-        for (title, action) in [("Start / Resume", #selector(resume(_:))), ("Pause", #selector(pause(_:))), ("Retry", #selector(retry(_:))), ("Refresh Download Address…", #selector(refreshAddress(_:))), ("Show Full Error…", #selector(showError(_:))), ("Show File", #selector(showFile(_:))), ("Cancel", #selector(cancel(_:)))] {
+        for (title, action) in [("Start / Resume", #selector(resume(_:))), ("Pause", #selector(pause(_:))), ("Retry", #selector(retry(_:))), ("Refresh Download Address…", #selector(refreshAddress(_:))), ("Show Full Error…", #selector(showError(_:))), ("Show File", #selector(showFile(_:))), ("Cancel", #selector(cancel(_:))), ("Remove from List", #selector(removeFromList(_:))), ("Delete File & Remove…", #selector(confirmDeleteFiles(_:)))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item)
         }
         let assignment = NSMenuItem(title: "Move to Queue", action: nil, keyEquivalent: "")
@@ -193,6 +248,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
     @objc private func resume(_ sender: Any?) { selectedJobs().forEach { queue.resume($0.id) } }
     @objc private func retry(_ sender: Any?) { selectedJobs().forEach { queue.retry($0.id) } }
     @objc private func cancel(_ sender: Any?) { selectedJobs().forEach { queue.cancel($0.id) } }
+    @objc private func selectSidebarFilter(_ sender: NSButton) {
+        selectedFilterTag = sender.tag; updateSidebarSelection(); reloadGrid()
+    }
+    private func updateSidebarSelection() {
+        let labels = ["All Downloads", "Downloading", "Queued", "Paused", "Completed", "Failed", "Cancelled"]
+        let rawStatuses = [nil, "downloading", "queued", "paused", "completed", "failed", "cancelled"] as [String?]
+        for button in sidebarButtons where labels.indices.contains(button.tag) {
+            let count = rawStatuses[button.tag].map { value in queue.jobs.filter { $0.status.rawValue == value }.count } ?? queue.jobs.count
+            button.title = "\(labels[button.tag])  \(count)"
+            button.state = button.tag == selectedFilterTag ? .on : .off
+            button.contentTintColor = button.tag == selectedFilterTag ? .controlAccentColor : .secondaryLabelColor
+        }
+    }
+    @objc private func removeFromList(_ sender: Any?) {
+        let ids = selectedJobs().map(\.id)
+        guard !ids.isEmpty else { message.stringValue = "Select stopped downloads to remove them from history."; return }
+        do { try queue.removeFromList(ids); message.stringValue = "Removed selected downloads from history. Saved files were kept." }
+        catch { message.stringValue = "Active downloads must be paused or cancelled before they can be removed." }
+    }
+    @objc private func confirmDeleteFiles(_ sender: Any?) {
+        let jobs = selectedJobs().filter { $0.status == .completed }
+        guard !jobs.isEmpty else { message.stringValue = "Select one or more completed downloads first."; return }
+        let alert = NSAlert(); alert.alertStyle = .critical
+        alert.messageText = jobs.count == 1 ? "Delete this downloaded file?" : "Delete \(jobs.count) downloaded files?"
+        alert.informativeText = jobs.count == 1 ? jobs[0].destination.path : "The selected completed files will be deleted from disk and removed from history."
+        alert.addButton(withTitle: "Delete File & Remove"); alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            for job in jobs {
+                do { try self.queue.removeFromList(job.id, deleteFile: true) }
+                catch { self.message.stringValue = "A file could not be deleted. Check its location and permissions."; break }
+            }
+        }
+    }
     @objc private func assignQueue(_ sender: NSMenuItem) {
         let id = (sender.representedObject as? String).flatMap(UUID.init(uuidString:))
         selectedJobs().forEach { queue.assign($0.id, to: id) }
@@ -230,28 +319,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
     @objc private func filterChanged(_ sender: Any?) { reloadGrid() }
     private func reloadGrid() {
         let selected = Set(selectedJobs().map(\.id)); let query = search.stringValue.lowercased()
-        let state = filter.indexOfSelectedItem == 0 ? nil : filter.titleOfSelectedItem?.lowercased()
-        displayed = queue.jobs.filter { (state == nil || $0.status.rawValue == state) && (query.isEmpty || $0.fileName.lowercased().contains(query)) }
-        if let sort = table.sortDescriptors.first, let key = sort.key {
-            displayed.sort { a, b in
-                let comparison: ComparisonResult
-                switch key {
-                case "progress": comparison = compare(a.progress ?? -1, b.progress ?? -1)
-                case "bytes": comparison = compare(Double(a.bytes), Double(b.bytes))
-                case "speed": comparison = compare(a.speed, b.speed)
-                case "eta": comparison = compare(a.eta ?? .infinity, b.eta ?? .infinity)
-                case "connections": comparison = compare(Double(a.activeConnections), Double(b.activeConnections))
-                case "state": comparison = a.status.rawValue.localizedStandardCompare(b.status.rawValue)
-                case "queue": comparison = queueName(a).localizedStandardCompare(queueName(b))
-                default: comparison = a.fileName.localizedStandardCompare(b.fileName)
-                }
-                return sort.ascending ? comparison == .orderedAscending : comparison == .orderedDescending
-            }
-        }
+        let rawStatuses = [nil, "downloading", "queued", "paused", "completed", "failed", "cancelled"] as [String?]
+        let state = rawStatuses.indices.contains(selectedFilterTag) ? rawStatuses[selectedFilterTag] : nil
+        let filtered = queue.jobs.filter { (state == nil || $0.status.rawValue == state) && (query.isEmpty || $0.fileName.lowercased().contains(query)) }
+        let sort = table.sortDescriptors.first
+        let names = Dictionary(uniqueKeysWithValues: queue.queues.map { ($0.id, $0.name) })
+        displayed = DownloadOrdering.sorted(filtered, key: sort?.key, ascending: sort?.ascending ?? true, queueNames: names)
+        subheading.stringValue = sort?.key.map { "\(displayed.count) items · Sorted by \($0)" } ?? "\(displayed.count) items · Newest first"
         table.reloadData(); table.selectRowIndexes(IndexSet(displayed.indices.filter { selected.contains(displayed[$0].id) }), byExtendingSelection: false)
-        table.menu = contextMenu()
+        table.menu = contextMenu(); updateSidebarSelection()
     }
-    private func compare(_ a: Double, _ b: Double) -> ComparisonResult { a < b ? .orderedAscending : a > b ? .orderedDescending : .orderedSame }
     private func queueName(_ job: DownloadJob) -> String { queue.queues.first { $0.id == job.queueID }?.name ?? "Unassigned" }
     func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) { reloadGrid() }
     func numberOfRows(in tableView: NSTableView) -> Int { displayed.count }
@@ -259,8 +336,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
         let job = displayed[row]; let text: String
         switch tableColumn?.identifier.rawValue {
         case "file": text = job.fileName
-        case "state": text = job.status.rawValue.capitalized + (job.error == nil ? "" : " — error")
-        case "progress": text = job.progress.map { String(format: "%.1f%%", $0 * 100) } ?? "—"
+        case "state":
+            let badge = NSTextField(labelWithString: job.status.rawValue.capitalized + (job.error == nil ? "" : " · Error"))
+            badge.font = .systemFont(ofSize: 11, weight: .semibold); badge.alignment = .center; badge.drawsBackground = true
+            badge.backgroundColor = statusColor(job.status).withAlphaComponent(0.13); badge.textColor = statusColor(job.status)
+            badge.wantsLayer = true; badge.layer?.cornerRadius = 8; badge.toolTip = job.error ?? badge.stringValue
+            badge.setAccessibilityLabel(badge.stringValue); return badge
+        case "progress":
+            let bar = NSProgressIndicator(); bar.style = .bar; bar.minValue = 0; bar.maxValue = 1; bar.controlSize = .small
+            let percent = NSTextField(labelWithString: job.progress.map { String(format: "%.0f%%", $0 * 100) } ?? "—")
+            percent.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium); percent.textColor = .secondaryLabelColor; percent.alignment = .right
+            if let value = job.progress { bar.doubleValue = value } else { bar.isIndeterminate = true; bar.startAnimation(nil) }
+            let cell = NSStackView(views: [bar, percent]); cell.orientation = .horizontal; cell.alignment = .centerY; cell.spacing = 8
+            bar.widthAnchor.constraint(equalToConstant: 84).isActive = true; percent.widthAnchor.constraint(equalToConstant: 42).isActive = true
+            return cell
         case "bytes": text = job.kind == .hls ? "\(job.bytes) segments" : ByteCountFormatter.string(fromByteCount: job.bytes, countStyle: .file) + (job.total.map { " / " + ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "")
         case "speed": text = job.status == .downloading ? (job.kind == .hls ? String(format: "%.1f segments/s", job.speed) : ByteCountFormatter.string(fromByteCount: Int64(max(0, job.speed)), countStyle: .file) + "/s") : "—"
         case "eta": text = job.eta.map { seconds in seconds.isFinite ? String(format: "%dm %02ds", Int(seconds) / 60, Int(seconds) % 60) : "—" } ?? "—"
@@ -268,7 +357,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
         case "queue": text = queueName(job)
         default: text = ""
         }
-        let label = NSTextField(labelWithString: text); label.lineBreakMode = .byTruncatingMiddle; label.toolTip = job.error ?? text; label.setAccessibilityLabel(text); return label
+        if tableColumn?.identifier.rawValue == "file" {
+            let symbol = ["mp4", "m4v", "mov", "mkv", "webm", "avi"].contains(job.fileName.split(separator: ".").last?.lowercased() ?? "") ? "film" : "doc"
+            let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: symbol) ?? NSImage())
+            icon.contentTintColor = job.status == .completed ? .systemGreen : .secondaryLabelColor
+            icon.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            let name = NSTextField(labelWithString: text); name.font = .systemFont(ofSize: 12, weight: .medium); name.lineBreakMode = .byTruncatingMiddle; name.toolTip = text
+            let cell = NSStackView(views: [icon, name]); cell.orientation = .horizontal; cell.alignment = .centerY; cell.spacing = 9; return cell
+        }
+        let label = NSTextField(labelWithString: text); label.font = .systemFont(ofSize: 12); label.textColor = .secondaryLabelColor; label.lineBreakMode = .byTruncatingMiddle; label.toolTip = job.error ?? text; label.setAccessibilityLabel(text); return label
+    }
+    private func statusColor(_ status: DownloadStatus) -> NSColor {
+        switch status {
+        case .downloading: return .controlAccentColor
+        case .completed: return .systemGreen
+        case .failed: return .systemRed
+        case .paused: return .systemOrange
+        case .queued: return .secondaryLabelColor
+        case .cancelled: return .tertiaryLabelColor
+        }
     }
     @objc private func showSettings(_ sender: Any?) {
         if let settingsWindow { settingsWindow.makeKeyAndOrderFront(nil); return }

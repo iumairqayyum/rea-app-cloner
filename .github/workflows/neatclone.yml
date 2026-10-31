@@ -56,8 +56,15 @@ jobs:
         run: NEATCLONE_ARCH=${{ matrix.arch }} bash scripts/build-macos.sh
       - name: AppKit launch, responder checks and screenshot
         run: python3 -c 'import subprocess,sys; subprocess.run(["dist/NeatClone.app/Contents/MacOS/NeatClone", "--ui-smoke-output", sys.argv[1]], check=True, timeout=90)' "$PWD/dist/NeatClone-${{ matrix.arch }}.png"
-      - name: Package executable-preserving app ZIP
-        run: ditto -c -k --sequesterRsrc --keepParent dist/NeatClone.app dist/NeatClone-${{ matrix.arch }}.zip
+      - name: Package app, extension, host registration and install steps
+        run: |
+          package="dist/NeatClone-${{ matrix.arch }}-package"
+          mkdir -p "$package"
+          ditto dist/NeatClone.app "$package/NeatClone.app"
+          ditto extension "$package/extension"
+          cp scripts/register-native-host.py "$package/register-native-host.py"
+          cp INSTALL-MACOS.txt "$package/INSTALL.txt"
+          ditto -c -k --sequesterRsrc --keepParent "$package" "dist/NeatClone-${{ matrix.arch }}.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: NeatClone-${{ matrix.arch }}-developer-build

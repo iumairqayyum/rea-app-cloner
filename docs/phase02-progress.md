@@ -111,3 +111,30 @@ separate acceptance work even if newer macOS CI builds and UI checks pass.
 - Scheduled sleep, scripts and app termination are intentionally unsupported.
 - No low-memory physical-Mac, Monterey hardware or arbitrary-content media-sync
   qualification; controlled fixture measurements do not establish those claims.
+
+## Phase 02 stabilization pass
+
+The integration branch adds HTTP-status preservation for permanent probe denials,
+safe single-stream recovery after malformed or interrupted ranges, batched durable
+range checkpoints, and deterministic 100 MB resume coverage. The default history
+is newest first, sortable by table columns, supports multi-select removal without
+deleting output, and offers a separately confirmed delete-file action. The AppKit
+smoke path now seeds isolated sample states and checks filtering, sorting, paste,
+settings, responder menus, and download context actions before capturing a PNG.
+Connection settings now expose every value from 1 through 32.
+
+Cloudflare's public 1 MB endpoint ignored `Range` and returned HTTP 200 with the
+full 1,000,000-byte body, which exercises the safe single-stream path. The 100 MB
+endpoint returned HTTP 403 with a one-byte response even to the initial one-byte
+range probe. That is a remote server restriction, not a demonstrated client
+transfer defect; NeatClone surfaces the 403 and does not retry through another
+mode or bypass the refusal. No large third-party transfer was attempted.
+
+In the current restricted Linux workspace, the newest-first sorting and safe
+remove/delete core tests passed (2/2), as did all 20 extension Node tests. The
+full Swift HTTP-fixture suite and compiled native-host integration script could
+not bind loopback sockets here (`EPERM`); their earlier focused runs passed, and
+the full PR CI matrix is required to validate the latest commit. This Linux host
+cannot run AppKit, so the macOS CI smoke launch and screenshot remain the source
+of truth for the redesigned UI. The fresh Intel ZIP and per-architecture CI
+results will be linked after the pushed PR build completes.

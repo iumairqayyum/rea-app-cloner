@@ -19,25 +19,36 @@ included. Existing REA 6.8.0 was reused without reinstalling it.
 
 ## Implemented scope
 
-- Native AppKit queue/history table, URL entry, destination chooser, progress,
-  transfer speed, pause, resume, retry, cancel, show completed file.
+- Native AppKit library sidebar, newest-first history table with working column
+  sorting and multi-selection, URL entry, destination chooser, colored status
+  badges, progress bars, transfer speed, ETA, live connection count, pause,
+  resume, retry, cancel, remove-from-history, confirmed file deletion and
+  detailed errors. The interface uses system semantic colors and adapts to
+  light/dark appearance. Standard Cmd+V pastes URLs into the focused URL field.
 - A serial durable queue shared by the UI and portable CLI. Restarted interrupted
   transfers remain paused until the user resumes. Receipt IDs prevent duplicate
   inbox imports after a crash. Queue/history stores error categories, not raw
   errors with signed URLs. Local JSON state contains requested URLs and must be
   treated as private data; it is permission-restricted, not encrypted.
-- Streaming HTTP(S) transfers to private partial files. Strong ETag or
-  Last-Modified plus `If-Range`; validated range start/end/total and response
-  lengths. A 200 response to Range truncates and restarts; inconsistent 206 or
-  stale 416 is not accepted as complete. Bounded transient retries use backoff.
-  Existing files are not overwritten. Names are sanitized and collisions get
-  numbered names. HTTPS downgrade redirects and encoded response bodies are
-  refused. Server `Content-Disposition` renaming is not implemented: the URL
-  path or user name determines the safe filename, so a redirect may need a name.
+- Streaming HTTP(S) transfers with bounded buffers. Large responses use
+  validated adaptive byte ranges, 1–32 configured connections, strong ETag or
+  Last-Modified identity, atomic checkpoints, cached-range corruption checks,
+  retry/backoff, cancellation and safe single-connection fallback. When a server
+  ignores Range, a fresh sequential stream is used; mismatched ranges are never
+  appended. Direct streams write incrementally to private partial files rather
+  than buffering the complete response. Existing files are not overwritten.
+  Names are sanitized and collisions get numbered names. HTTPS downgrade
+  redirects and encoded response bodies are refused. Server
+  `Content-Disposition` renaming is not implemented for manually entered URLs;
+  the URL path or user's optional name determines the filename.
 - Chrome MV3 popup with explicit per-site permission, DOM media/source/link and
-  resource-timing detection, opt-in response MIME observation, and user-triggered
-  handoff. It does not collect browser cookies, intercept downloads, or read
-  response bodies. Cross-site media requires separate site permission.
+  resource-timing detection, opt-in response MIME observation and user-triggered
+  handoff. Optional download interception is limited to explicitly enabled
+  sites and validated file types/sizes. It pauses Chrome's transfer and cancels
+  it only after native receipt acknowledgement. It does not collect browser
+  cookies, headers or response bodies. Cross-site media requires separate
+  permission. See the extension README for Chromium policy and real-browser test
+  limits.
 - Direct MP4 preferred over HLS **only** for the same DOM media group and equal
   explicitly declared quality. Unknown identity/quality is left to the user.
   TS segments are marked incomplete and cannot be handed off as a full video.
@@ -67,10 +78,28 @@ FFmpeg failure retains private partial work for diagnosis/retry; Cancel removes
 that job's partial work. Basic tested fixtures preserve video/audio durations;
 arbitrary content, codec compatibility and every timestamp layout are unverified.
 
+## Large-file and HTTP 403 behavior
+
+The adaptive range engine caps an individual response buffer at 512 KiB and
+currently accepts known files up to 512 GiB. A deterministic streamed 100 MB
+loopback test pauses after a verified checkpoint, resumes with bounded parallel
+ranges, checks the exact output size, and samples content across the file. This
+does not qualify multi-gigabyte performance on real networks or disks.
+
+On 31 October 2026, the one-byte Range probe for
+`https://speed.cloudflare.com/__down?bytes=1000000` received HTTP 200 with a
+1,000,000-byte body; this endpoint ignores Range and NeatClone safely uses one
+streaming connection. The same probe for `...?bytes=100000000` received HTTP 403
+with a one-byte body and a Cloudflare `cf-ray` header. That is a server-side
+refusal, not an invalid range or a failed file write. NeatClone reports the 403
+and does not retry using another method to work around it. Other servers may
+apply different size/access limits.
+
 ## Build and use on your Mac
 
-These steps are supplied for macOS validation; **this Linux task has not executed
-the AppKit UI or a macOS binary**. A Mac validation checklist is below.
+The Intel and Apple Silicon developer builds are compiled and smoke-tested by
+GitHub Actions on macOS 15. A physical Intel Mac running Monterey 12 has not
+been tested. An installation note is included in each downloadable ZIP.
 
 1. Install Xcode command-line tools with a Swift **5.9+** compiler (or Xcode).
    Build on a supported current macOS/Xcode host; the resulting app targets 12.0.
@@ -82,7 +111,7 @@ the AppKit UI or a macOS binary**. A Mac validation checklist is below.
    ```
 
 3. Copy `dist/NeatClone.app` to `/Applications`, then open it. The build script
-   requests x86_64 and sets deployment target 12.0. It makes a local ad-hoc
+   requests x86_64 by default and sets deployment target 12.0. It makes a local ad-hoc
    signature; no Developer ID signing, notarization or distribution testing has
    occurred. Use macOS's normal approval UI if it asks about this local build.
    The bundle permits HTTP for user-requested downloads; HTTPS certificate
@@ -156,7 +185,8 @@ work and grid filtering as described in its report.
 
 ## macOS acceptance work still required
 
-- Compile AppKit against the macOS SDK and run on Intel Monterey 12+.
+- Run on a physical Intel Monterey 12+ Mac and verify long-running downloads and
+  quit/reopen recovery there.
 - Confirm destination chooser, UI progress, quit/reopen recovery and history.
 - Register Chrome's actual extension ID and verify browser → compiled host →
   running app → completed file. Linux host tests alone do not prove Mac launch.
@@ -164,6 +194,5 @@ work and grid filtering as described in its report.
   video extraction or support for protected services is promised.
 - Test signed/notarized distribution separately if this becomes a public app.
 
-See [verification results](../../docs/neatclone-verification.md) for the actual
-checks run in this task. CI configuration is provided; a workflow file is not
-evidence that CI has run or passed.
+See [Phase 02 verification](../../docs/phase02-progress.md) and the PR's GitHub
+Actions run for current test and artifact status.

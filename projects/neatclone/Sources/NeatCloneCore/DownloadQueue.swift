@@ -149,6 +149,47 @@ import Foundation
         else { try? FileManager.default.removeItem(at: workDirectory(for: jobs[i])) }
         changed()
     }
+    /// Remove a stopped job from history. Completed output remains unless the
+    /// caller explicitly requests deletion after a user confirmation.
+    public func removeFromList(_ id: UUID, deleteFile: Bool = false) throws {
+        if !deleteFile { try removeFromList([id]); return }
+        guard activeID != id, let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].status != .downloading else {
+            throw DownloadError.unsafeDestination
+        }
+        let job = jobs[index]
+        guard job.status == .completed, job.destination.isFileURL,
+              FileManager.default.fileExists(atPath: job.destination.path) else { throw DownloadError.unsafeDestination }
+        jobs.remove(at: index)
+        do {
+            try persist(); persistenceError = nil
+        } catch {
+            jobs.insert(job, at: index); persistenceError = DownloadError.localIO.errorDescription
+            throw DownloadError.localIO
+        }
+        if deleteFile {
+            do { try FileManager.default.removeItem(at: job.destination) }
+            catch {
+                jobs.insert(job, at: min(index, jobs.count))
+                do { try persist(); persistenceError = nil } catch { persistenceError = DownloadError.localIO.errorDescription }
+                throw DownloadError.localIO
+            }
+        }
+        try? FileManager.default.removeItem(at: workDirectory(for: job))
+        onChange?(); startNext()
+    }
+    public func removeFromList(_ ids: [UUID]) throws {
+        let removing = Set(ids)
+        let removed = jobs.filter { removing.contains($0.id) }
+        guard !removed.isEmpty, removed.allSatisfy({ activeID != $0.id && $0.status != .downloading }) else {
+            throw DownloadError.unsafeDestination
+        }
+        let previous = jobs
+        jobs.removeAll { removing.contains($0.id) }
+        do { try persist(); persistenceError = nil }
+        catch { jobs = previous; persistenceError = DownloadError.localIO.errorDescription; throw DownloadError.localIO }
+        removed.forEach { try? FileManager.default.removeItem(at: workDirectory(for: $0)) }
+        onChange?(); startNext()
+    }
     private func workDirectory(for job: DownloadJob) -> URL {
         job.destination.deletingLastPathComponent().appendingPathComponent(".neatclone-\(job.id.uuidString)", isDirectory: true)
     }

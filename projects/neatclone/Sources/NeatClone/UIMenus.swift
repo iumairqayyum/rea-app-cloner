@@ -52,6 +52,7 @@ import AppKit
 /// Native selection semantics plus user-requested clipboard actions for the grid.
 @MainActor final class DownloadTableView: NSTableView {
     var copyText: (() -> String)?
+    var removeSelection: (() -> Void)?
     override var acceptsFirstResponder: Bool { true }
     override func menu(for event: NSEvent) -> NSMenu? {
         let row = self.row(at: convert(event.locationInWindow, from: nil))
@@ -62,6 +63,13 @@ import AppKit
         guard let value = copyText?(), !value.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
+    }
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 51 || event.keyCode == 117 {
+            removeSelection?()
+            return
+        }
+        super.keyDown(with: event)
     }
 }
 #endif

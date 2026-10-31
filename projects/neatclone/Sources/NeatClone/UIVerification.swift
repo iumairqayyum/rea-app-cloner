@@ -49,6 +49,18 @@ import AppKit
             try require(item.keyEquivalent == key && item.keyEquivalentModifierMask == modifiers, "Wrong \(title) shortcut")
         }
     }
+    static func verifyDownloadMenu(_ menu: NSMenu?) throws {
+        guard let menu else { throw Failure(message: "Missing download context menu") }
+        let required: [(String, Selector)] = [
+            ("Remove from List", Selector(("removeFromList:"))),
+            ("Delete File & Remove…", Selector(("confirmDeleteFiles:"))),
+            ("Show Full Error…", Selector(("showError:")))
+        ]
+        for (title, action) in required {
+            guard let item = menu.items.first(where: { $0.title == title }) else { throw Failure(message: "Missing download action: \(title)") }
+            try require(item.action == action, "Wrong action for \(title)")
+        }
+    }
     static func verifyTextField(_ field: NSTextField, in window: NSWindow) throws {
         try prepareWindow(window)
         field.stringValue = "original"

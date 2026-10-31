@@ -52,7 +52,9 @@ public enum DownloadError: Error, Equatable, LocalizedError {
         switch self {
         case .invalidURL: return "Use an HTTP or HTTPS URL without embedded credentials. TS segments are not full videos."
         case .unsafeDestination: return "Choose a writable destination directory."
-        case .http(let code): return "Server returned HTTP \(code). Renew the authorized URL if it expired."
+        case .http(let code):
+            if code == 403 { return "Server refused this request (HTTP 403). Check its published access or size limits; NeatClone will not bypass the denial." }
+            return "Server returned HTTP \(code). Renew the authorized URL if it expired."
         case .invalidRange: return "The server returned an inconsistent byte range; retry from the beginning."
         case .incomplete: return "The response ended before all expected bytes arrived."
         case .localIO: return "Cannot write the download or queue state. Check disk space and permissions."
