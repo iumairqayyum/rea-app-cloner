@@ -95,6 +95,10 @@ import AppKit
     }
     static func png(window: NSWindow, to output: URL) throws {
         guard let view = window.contentView else { throw Failure(message: "Missing content view") }
+        // Automated responder checks temporarily resize/focus sheets. Restore
+        // the main window's minimum drawable area before capturing its content.
+        window.setContentSize(NSSize(width: max(840, view.bounds.width), height: max(540, view.bounds.height)))
+        window.makeKeyAndOrderFront(nil)
         view.layoutSubtreeIfNeeded()
         NSApp.updateWindows(); view.displayIfNeeded()
         let width = Int(ceil(view.bounds.width)), height = Int(ceil(view.bounds.height))
