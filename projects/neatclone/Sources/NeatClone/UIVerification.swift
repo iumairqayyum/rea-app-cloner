@@ -96,7 +96,14 @@ import AppKit
     static func png(window: NSWindow, to output: URL) throws {
         guard let view = window.contentView else { throw Failure(message: "Missing content view") }
         view.layoutSubtreeIfNeeded()
-        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw Failure(message: "Cannot capture view") }
+        NSApp.updateWindows(); view.displayIfNeeded()
+        let width = Int(ceil(view.bounds.width)), height = Int(ceil(view.bounds.height))
+        guard width > 0, height > 0 else { throw Failure(message: "Window has no drawable content size: \(view.bounds)") }
+        let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) ?? NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0)
+        guard let bitmap else { throw Failure(message: "Cannot allocate \(width)×\(height) screenshot bitmap") }
         view.cacheDisplay(in: view.bounds, to: bitmap)
         guard let data = bitmap.representation(using: .png, properties: [:]), !data.isEmpty else { throw Failure(message: "No PNG representation") }
         try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
