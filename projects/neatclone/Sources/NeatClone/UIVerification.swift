@@ -97,11 +97,11 @@ import AppKit
         guard let view = window.contentView else { throw Failure(message: "Missing content view") }
         // Automated responder checks temporarily resize/focus sheets. Restore
         // the main window's minimum drawable area before capturing its content.
+        window.makeKeyAndOrderFront(nil)
         let origin = window.frame.origin
         window.setFrame(NSRect(origin: origin, size: NSSize(width: 1260, height: 760)), display: true)
         window.setContentSize(NSSize(width: 1260, height: 760))
         if view.bounds.height <= 0 { view.setFrameSize(NSSize(width: 1260, height: 700)) }
-        window.makeKeyAndOrderFront(nil)
         view.layoutSubtreeIfNeeded()
         NSApp.updateWindows(); view.displayIfNeeded()
         let width = Int(ceil(view.bounds.width)), height = Int(ceil(view.bounds.height))
