@@ -7,13 +7,13 @@ final class HTTPDownloadTests: XCTestCase {
     private let body = Data((0..<262144).map { UInt8($0 % 251) })
     private final class Server {
         let root: URL
-        let process: Process
+        let reaper: ChildProcessReaper
         let url: URL
         init(mode: String) async throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             let ready = root.appendingPathComponent("port")
-            process = Process()
+            let process = Process()
             guard let python = ["/usr/bin/python3", "/usr/local/bin/python3", "/opt/homebrew/bin/python3"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { throw DownloadError.transport }
             process.executableURL = URL(fileURLWithPath: python)
             let script = #"""
@@ -52,19 +52,19 @@ server.serve_forever()
             process.arguments = ["-u", "-c", script, ready.path, mode]
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
-            try process.run()
+            reaper = try ChildProcessReaper(process)
             var port: Int?
             let deadline = Date().addingTimeInterval(15)
-            while Date() < deadline && process.isRunning {
+            while Date() < deadline {
                 port = (try? String(contentsOf: ready)).flatMap(Int.init)
                 if port != nil { break }
                 try await Task.sleep(nanoseconds: 20_000_000)
             }
-            guard let port else { process.terminate(); throw DownloadError.transport }
+            guard let port else { reaper.terminate(); throw DownloadError.transport }
             url = URL(string: "http://127.0.0.1:\(port)/video.mp4")!
         }
         deinit {
-            if process.isRunning { process.terminate(); process.waitUntilExit() }
+            reaper.terminate()
             try? FileManager.default.removeItem(at: root)
         }
     }

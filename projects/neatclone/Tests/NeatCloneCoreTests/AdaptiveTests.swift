@@ -4,7 +4,7 @@ import XCTest
 final class AdaptiveTests: XCTestCase {
     final class Server {
         let root: URL
-        let process: Process
+        let reaper: ChildProcessReaper
         let base: URL
         let size: Int
         init(size: Int = 2_097_152) async throws {
@@ -12,7 +12,7 @@ final class AdaptiveTests: XCTestCase {
             root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             guard let python = ["/usr/bin/python3", "/usr/local/bin/python3", "/opt/homebrew/bin/python3"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { throw DownloadError.transport }
-            process = Process(); process.executableURL = URL(fileURLWithPath: python)
+            let process = Process(); process.executableURL = URL(fileURLWithPath: python)
             let script = #"""
 import http.server,sys,time,pathlib,signal,os
 signal.pthread_sigmask(signal.SIG_UNBLOCK,{signal.SIGTERM})
@@ -45,18 +45,18 @@ server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
 """#
             process.arguments = ["-u", "-c", script, root.path, String(size)]
             process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
-            try process.run()
+            reaper = try ChildProcessReaper(process)
             var port: Int?
             let deadline = Date().addingTimeInterval(15)
-            while Date() < deadline && process.isRunning {
+            while Date() < deadline {
                 port = (try? String(contentsOf: root.appendingPathComponent("port"))).flatMap(Int.init)
                 if port != nil { break }; try await Task.sleep(nanoseconds: 20_000_000)
             }
-            guard let port else { process.terminate(); throw DownloadError.transport }
+            guard let port else { reaper.terminate(); throw DownloadError.transport }
             base = URL(string: "http://127.0.0.1:\(port)")!
         }
         deinit {
-            if process.isRunning { process.terminate(); process.waitUntilExit() }
+            reaper.terminate()
             try? FileManager.default.removeItem(at: root)
         }
         var body: Data { Data((0..<size).map { UInt8($0 % 251) }) }
