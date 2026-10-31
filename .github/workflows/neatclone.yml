@@ -71,8 +71,13 @@ jobs:
           if-no-files-found: error
           path: |
             projects/neatclone/dist/NeatClone-${{ matrix.arch }}.zip
-            projects/neatclone/dist/NeatClone-${{ matrix.arch }}.png
             projects/neatclone/dist/transfer-profile-${{ matrix.arch }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NeatClone-${{ matrix.arch }}-ui-screenshot
+          if-no-files-found: warn
+          path: projects/neatclone/dist/NeatClone-${{ matrix.arch }}.png
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

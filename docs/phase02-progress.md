@@ -70,7 +70,7 @@ the Phase 01 refusals for unsupported/encrypted content.
 Use [the project README](../projects/neatclone/README.md) for native-host setup.
 The build script accepts `NEATCLONE_ARCH=x86_64` (default) or `arm64`; both target
 macOS 12.0. CI packages each application using `ditto` into an executable-preserving
-ZIP and captures a real AppKit content-view PNG after responder checks. Builds
+ZIP and attempts a real AppKit content-view PNG after smoke checks. Builds
 have local ad-hoc signatures, not Developer ID notarization. Do not disable macOS
 security controls to install them.
 
@@ -120,7 +120,8 @@ range checkpoints, and deterministic 100 MB resume coverage. The default history
 is newest first, sortable by table columns, supports multi-select removal without
 deleting output, and offers a separately confirmed delete-file action. The AppKit
 smoke path now seeds isolated sample states and checks filtering, sorting, paste,
-settings, responder menus, and download context actions before capturing a PNG.
+settings, responder menus, and download context actions. Screenshot capture is
+optional if AppKit does not provide a drawable bitmap.
 Connection settings now expose every value from 1 through 32.
 
 Cloudflare's public 1 MB endpoint ignored `Range` and returned HTTP 200 with the

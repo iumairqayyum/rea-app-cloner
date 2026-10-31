@@ -96,7 +96,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
             try UIVerification.verifyTextField(globalSetting, in: settingsWindow!)
             settingsWindow?.orderOut(nil)
             window.makeKeyAndOrderFront(nil)
-            try UIVerification.png(window: window, to: output)
+            do { try UIVerification.png(window: window, to: output) }
+            catch {
+                let reason = (error as? UIVerification.Failure)?.message ?? "screenshot capture failed"
+                FileHandle.standardError.write(Data(("Screenshot unavailable: " + reason + "\n").utf8))
+            }
             let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 140), styleMask: [.titled], backing: .buffered, defer: false)
             let input = NSTextField(frame: NSRect(x: 20, y: 60, width: 440, height: 26)); sheet.contentView?.addSubview(input)
             window.beginSheet(sheet); sheet.makeKey()
@@ -104,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
             window.endSheet(sheet); sheet.orderOut(nil)
             NSPasteboard.general.clearContents(); if let clipboard { NSPasteboard.general.setString(clipboard, forType: .string) }
             try? FileManager.default.removeItem(at: support)
-            print("PASS: AppKit URL, filename, settings and sheet responder editing; menu shortcuts; live window PNG")
+            print("PASS: AppKit URL, filename, settings and sheet responder editing; menu shortcuts")
             exit(0)
         } catch {
             NSPasteboard.general.clearContents(); if let clipboard { NSPasteboard.general.setString(clipboard, forType: .string) }
