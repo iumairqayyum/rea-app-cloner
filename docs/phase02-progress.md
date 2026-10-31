@@ -76,12 +76,22 @@ security controls to install them.
 
 ## Verification
 
-Integrated Linux validation passed: **37 XCTest cases, 0 failures**, **5 compiled
-binary integration tests, 0 failures**, and **20 extension Node tests, 0 failures**.
-The portable preference/default/round-trip checks also passed. Mac-only tests are
-excluded on Linux, not counted as Linux passes. A separate Swift Testing runner
-reports zero because these suites use XCTest; the 37 executed XCTest cases are
-the applicable count.
+Latest integrated verification passed in [GitHub Actions run 41175693063](https://github.com/iumairqayyum/rea-app-cloner/actions/runs/41175693063)
+at commit `7744bfe785482d12a38df913a5cb408d287558d2`: Linux ran **42 XCTest
+cases**, **5 compiled native-host integration tests**, and **20 extension Node
+tests**, all with zero failures. Intel and arm64 macOS each ran **46 XCTest
+cases** with zero failures, built the app, and passed the AppKit launch smoke
+for menus, URL paste, sorting, filters, settings, and sheet editing. Linux local
+reruns in the managed task could not bind loopback sockets (`EPERM`); the same
+HTTP fixture and native-host checks passed in CI.
+
+The Intel developer ZIP is [NeatClone-x86_64-developer-build](https://github.com/iumairqayyum/rea-app-cloner/actions/runs/41175693063/artifacts/13033300529)
+(artifact ID `13033300529`, expires 29 January 2027). It contains the Intel
+`NeatClone.app`, MV3 extension, native-host registration script, and `INSTALL.txt`.
+The optional screenshot artifact was not produced: the hosted AppKit process
+reported a zero-height content view. Screenshot capture does not gate the
+functional smoke or build. The AppKit smoke ran on macOS 15 hosted runners; no
+physical Monterey 12+ Intel machine was available for direct installation tests.
 
 Measured fixture checks transferred 262,144 bytes in approximately 2.0 seconds
 under a 131,072 B/s per-download cap, and two concurrent downloads shared that
@@ -131,11 +141,8 @@ range probe. That is a remote server restriction, not a demonstrated client
 transfer defect; NeatClone surfaces the 403 and does not retry through another
 mode or bypass the refusal. No large third-party transfer was attempted.
 
-In the current restricted Linux workspace, the newest-first sorting and safe
-remove/delete core tests passed (2/2), as did all 20 extension Node tests. The
-full Swift HTTP-fixture suite and compiled native-host integration script could
-not bind loopback sockets here (`EPERM`); their earlier focused runs passed, and
-the full PR CI matrix is required to validate the latest commit. This Linux host
-cannot run AppKit, so the macOS CI smoke launch and screenshot remain the source
-of truth for the redesigned UI. The fresh Intel ZIP and per-architecture CI
-results will be linked after the pushed PR build completes.
+In the managed Linux workspace, newest-first sorting and safe remove/delete
+tests passed locally; local HTTP fixture and native-host integration reruns were
+blocked because this task sandbox denies loopback socket creation (`EPERM`). The
+latest GitHub Actions matrix completed those checks successfully. AppKit runs on
+the hosted macOS CI workers; this Linux host cannot execute the macOS UI.
