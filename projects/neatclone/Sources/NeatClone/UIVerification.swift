@@ -4,6 +4,33 @@ import AppKit
 @MainActor enum UIVerification {
     struct Failure: Error { let message: String }
     private static var preparedApplication = false
+    static let minimumMainContentSize = NSSize(width: 840, height: 540)
+    static let initialMainContentSize = NSSize(width: 1260, height: 760)
+
+    /// Clamp restored frame autosave state after AppKit has loaded it. Monterey
+    /// can restore an older frame below minSize when minSize was assigned first.
+    static func enforceUsableMainWindowSize(_ window: NSWindow) {
+        window.contentMinSize = minimumMainContentSize
+        // NSWindow.minSize measures the frame, including title and toolbar chrome.
+        window.minSize = NSSize(width: minimumMainContentSize.width, height: minimumMainContentSize.height + 100)
+        let size = window.contentView?.bounds.size ?? .zero
+        if size.width < minimumMainContentSize.width || size.height < minimumMainContentSize.height {
+            window.setContentSize(initialMainContentSize)
+        }
+    }
+
+    static func verifyUsableMainWindow(_ window: NSWindow, controls: [(String, NSView)]) throws {
+        guard let content = window.contentView else { throw Failure(message: "Main window has no content view") }
+        content.layoutSubtreeIfNeeded()
+        let size = content.bounds.size
+        try require(size.width >= minimumMainContentSize.width && size.height >= minimumMainContentSize.height,
+                    "Main content view collapsed to \(size.width)×\(size.height); expected at least \(minimumMainContentSize.width)×\(minimumMainContentSize.height)")
+        for (name, control) in controls {
+            let rect = control.convert(control.bounds, to: content)
+            try require(!control.isHidden && rect.width > 0 && rect.height > 0 && content.bounds.intersects(rect),
+                        "\(name) is not visible in the main window: \(rect)")
+        }
+    }
 
     /// XCTest's command-line runner does not call NSApplication.run(). Bootstrap
     /// the normal AppKit lifecycle and wait for WindowServer activation before
@@ -95,13 +122,6 @@ import AppKit
     }
     static func png(window: NSWindow, to output: URL) throws {
         guard let view = window.contentView else { throw Failure(message: "Missing content view") }
-        // Automated responder checks temporarily resize/focus sheets. Restore
-        // the main window's minimum drawable area before capturing its content.
-        window.makeKeyAndOrderFront(nil)
-        let origin = window.frame.origin
-        window.setFrame(NSRect(origin: origin, size: NSSize(width: 1260, height: 760)), display: true)
-        window.setContentSize(NSSize(width: 1260, height: 760))
-        if view.bounds.height <= 0 { view.setFrameSize(NSSize(width: 1260, height: 700)) }
         view.layoutSubtreeIfNeeded()
         NSApp.updateWindows(); view.displayIfNeeded()
         let width = Int(ceil(view.bounds.width)), height = Int(ceil(view.bounds.height))

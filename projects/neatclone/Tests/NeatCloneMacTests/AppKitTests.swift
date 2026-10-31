@@ -40,6 +40,28 @@ import XCTest
         table.keyDown(with: event)
         XCTAssertTrue(invoked, "The Delete key must remove selected rows from the list")
     }
+    func testCollapsedRestoredFrameExpandsAndKeepsDownloadControlsVisible() async throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1260, height: 760),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        _ = window.setFrameAutosaveName("NeatClone.LayoutRegression.\(UUID().uuidString)")
+        let content = try XCTUnwrap(window.contentView)
+        let url = NSTextField(frame: NSRect(x: 20, y: 440, width: 400, height: 28))
+        let add = NSButton(title: "Add Download", target: nil, action: nil)
+        add.frame = NSRect(x: 430, y: 438, width: 150, height: 32)
+        let list = NSScrollView(frame: NSRect(x: 20, y: 30, width: 1180, height: 370))
+        content.addSubview(url); content.addSubview(add); content.addSubview(list)
+
+        // Simulate Monterey restoring a toolbar-only autosaved frame.
+        window.setFrame(NSRect(x: 0, y: 0, width: 1024, height: 78), display: false)
+        XCTAssertLessThan(content.bounds.height, UIVerification.minimumMainContentSize.height)
+        UIVerification.enforceUsableMainWindowSize(window)
+        try UIVerification.verifyUsableMainWindow(window, controls: [
+            ("Download URL", url), ("Add Download button", add), ("Downloads list", list)
+        ])
+        XCTAssertGreaterThanOrEqual(content.bounds.height, 540)
+        window.orderOut(nil)
+    }
     func testPreferencesRoundTripWithoutStoringCredentials() async throws {
         let name = "org.neatclone.ui-test-\(UUID().uuidString)"; let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }

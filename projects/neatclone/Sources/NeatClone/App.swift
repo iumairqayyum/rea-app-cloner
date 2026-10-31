@@ -8,12 +8,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
     private var queue: DownloadQueue!
     private var platform: MacIntegration!
     private let table = DownloadTableView()
+    private let downloadsScroll = NSScrollView()
+    private var addDownloadButton: NSButton!
     private let urlField = NSTextField()
     private let filenameField = NSTextField()
     private let search = NSSearchField()
     private let message = NSTextField(labelWithString: "Ready. Add an authorized URL or send one from Chrome.")
     private let folderLabel = NSTextField(labelWithString: "")
     private let sidebar = NSVisualEffectView()
+    private let inputCard = NSVisualEffectView()
     private var sidebarButtons: [NSButton] = []
     private var selectedFilterTag = 0
     private let heading = NSTextField(labelWithString: "Downloads")
@@ -73,6 +76,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
     private func runUISmoke(_ output: URL) {
         let clipboard = NSPasteboard.general.string(forType: .string)
         do {
+            try UIVerification.verifyUsableMainWindow(window, controls: [
+                ("Download URL", urlField), ("Add Download button", addDownloadButton),
+                ("Filename input", filenameField), ("HLS option", hls),
+                ("Downloads list", downloadsScroll), ("Download table", table)
+            ])
+            try UIVerification.png(window: window, to: output)
+            try UIVerification.require(urlField.target === self && urlField.action == #selector(addDownload(_:)), "URL field is not connected to Add URL")
+            try UIVerification.require(addDownloadButton.target === self && addDownloadButton.action == #selector(addDownload(_:)), "Add URL button is not connected to the queue action")
             try UIVerification.verifyMenus(NSApp.mainMenu!)
             try UIVerification.require(sidebarButtons.count == 7, "The download sidebar is incomplete")
             try UIVerification.require(table.allowsMultipleSelection && table.numberOfRows == 3, "The download table is missing multi-selection or sample history")
@@ -89,18 +100,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
             try UIVerification.require(window.makeFirstResponder(urlField), "Cannot focus URL field for Paste")
             try UIVerification.require(NSApp.sendAction(Selector(("paste:")), to: nil, from: nil), "Cmd+V did not reach the URL field")
             try UIVerification.require(urlField.stringValue == "https://example.test/pasted.mp4", "URL field Paste changed the clipboard text")
+            // Exercise the same visible button action with an isolated local URL,
+            // then cancel immediately so the smoke never contacts an external host.
+            let smokeURL = "http://127.0.0.1:1/ui-smoke.mp4"
+            urlField.stringValue = smokeURL
+            let previousIDs = Set(queue.jobs.map(\.id))
+            addDownloadButton.performClick(nil)
+            guard let smokeJob = queue.jobs.first(where: { !previousIDs.contains($0.id) && $0.url.absoluteString == smokeURL }) else {
+                throw UIVerification.Failure(message: "Add URL did not add the entered address to the queue")
+            }
+            queue.cancel(smokeJob.id)
+            try UIVerification.require(queue.jobs.contains(where: { $0.id == smokeJob.id && $0.status == .cancelled }), "The smoke download was not cleanly cancelled")
             try UIVerification.verifyTextField(filenameField, in: window)
             urlField.stringValue = ""; filenameField.stringValue = ""
             showSettings(nil)
             try UIVerification.verifyTextField(perDownloadSetting, in: settingsWindow!)
             try UIVerification.verifyTextField(globalSetting, in: settingsWindow!)
             settingsWindow?.orderOut(nil)
-            window.makeKeyAndOrderFront(nil)
-            do { try UIVerification.png(window: window, to: output) }
-            catch {
-                let reason = (error as? UIVerification.Failure)?.message ?? "screenshot capture failed"
-                FileHandle.standardError.write(Data(("Screenshot unavailable: " + reason + "\n").utf8))
-            }
             let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 140), styleMask: [.titled], backing: .buffered, defer: false)
             let input = NSTextField(frame: NSRect(x: 20, y: 60, width: 440, height: 26)); sheet.contentView?.addSubview(input)
             window.beginSheet(sheet); sheet.makeKey()
@@ -133,8 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
     private func createWindow() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1260, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.title = "NeatClone — Download Manager"; window.minSize = NSSize(width: 840, height: 540)
-        window.setFrameAutosaveName("NeatClone.MainWindow")
+        window.title = "NeatClone — Download Manager"
         let toolbar = NSToolbar(identifier: "NeatClone.Toolbar"); toolbar.delegate = self
         toolbar.displayMode = .iconAndLabel; toolbar.allowsUserCustomization = true; toolbar.autosavesConfiguration = true
         window.toolbar = toolbar; window.toolbarStyle = .expanded
@@ -158,8 +173,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
         filenameField.placeholderString = "Optional file name"; filenameField.setAccessibilityLabel("File name")
         urlField.target = self; urlField.action = #selector(addDownload(_:))
         urlField.font = .systemFont(ofSize: 14); filenameField.font = .systemFont(ofSize: 13)
-        let addButton = button("Add Download", #selector(addDownload(_:))); addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add download"); addButton.imagePosition = .imageLeading
-        let addressRow = NSStackView(views: [urlField, addButton]); addressRow.spacing = 10; addressRow.distribution = .fill
+        addDownloadButton = button("Add Download", #selector(addDownload(_:))); addDownloadButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add download"); addDownloadButton.imagePosition = .imageLeading
+        let addressRow = NSStackView(views: [urlField, addDownloadButton]); addressRow.spacing = 10; addressRow.distribution = .fill
         urlField.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
         let detailsRow = NSStackView(views: [filenameField, hls]); detailsRow.spacing = 12; detailsRow.distribution = .fill
         filenameField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
@@ -168,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
         let folder = NSStackView(views: [NSTextField(labelWithString: "Save to"), folderLabel, button("Choose…", #selector(chooseFolder(_:)))]); folder.spacing = 10
         let inputs = NSStackView(views: [addressRow, detailsRow, folder]); inputs.orientation = .vertical; inputs.alignment = .leading; inputs.spacing = 10
         inputs.translatesAutoresizingMaskIntoConstraints = false
-        let inputCard = NSVisualEffectView(); inputCard.material = .contentBackground; inputCard.blendingMode = .withinWindow; inputCard.state = .followsWindowActiveState
+        inputCard.material = .contentBackground; inputCard.blendingMode = .withinWindow; inputCard.state = .followsWindowActiveState
         inputCard.wantsLayer = true; inputCard.layer?.cornerRadius = 10; inputCard.layer?.masksToBounds = true; inputCard.addSubview(inputs)
         NSLayoutConstraint.activate([inputs.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 14), inputs.trailingAnchor.constraint(equalTo: inputCard.trailingAnchor, constant: -14), inputs.topAnchor.constraint(equalTo: inputCard.topAnchor, constant: 12), inputs.bottomAnchor.constraint(equalTo: inputCard.bottomAnchor, constant: -12), addressRow.widthAnchor.constraint(equalTo: inputs.widthAnchor), detailsRow.widthAnchor.constraint(equalTo: inputs.widthAnchor), folder.widthAnchor.constraint(equalTo: inputs.widthAnchor)])
 
@@ -191,16 +206,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
         table.removeSelection = { [weak self] in self?.removeFromList(nil) }
         table.menu = contextMenu()
         table.backgroundColor = .clear; table.gridColor = .separatorColor; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-        let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.drawsBackground = false; scroll.borderType = .noBorder
+        downloadsScroll.documentView = table; downloadsScroll.hasVerticalScroller = true; downloadsScroll.hasHorizontalScroller = true; downloadsScroll.drawsBackground = false; downloadsScroll.borderType = .noBorder
         message.lineBreakMode = .byWordWrapping; message.maximumNumberOfLines = 2; message.font = .systemFont(ofSize: 12); message.textColor = .secondaryLabelColor
-        let main = NSStackView(views: [header, inputCard, scroll, message]); main.orientation = .vertical; main.alignment = .leading; main.spacing = 16; main.translatesAutoresizingMaskIntoConstraints = false
+        let main = NSStackView(views: [header, inputCard, downloadsScroll, message]); main.orientation = .vertical; main.alignment = .leading; main.spacing = 16; main.translatesAutoresizingMaskIntoConstraints = false
         let view = NSView(); view.wantsLayer = true; view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         window.contentView = view; view.addSubview(sidebar); view.addSubview(main)
+        sidebar.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             sidebar.leadingAnchor.constraint(equalTo: view.leadingAnchor), sidebar.topAnchor.constraint(equalTo: view.topAnchor), sidebar.bottomAnchor.constraint(equalTo: view.bottomAnchor), sidebar.widthAnchor.constraint(equalToConstant: 184),
             main.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: 22), main.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -22), main.topAnchor.constraint(equalTo: view.topAnchor, constant: 20), main.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -18),
-            header.widthAnchor.constraint(equalTo: main.widthAnchor), inputCard.widthAnchor.constraint(equalTo: main.widthAnchor), scroll.widthAnchor.constraint(equalTo: main.widthAnchor), scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 250), message.widthAnchor.constraint(equalTo: main.widthAnchor)
+            header.widthAnchor.constraint(equalTo: main.widthAnchor), inputCard.widthAnchor.constraint(equalTo: main.widthAnchor), downloadsScroll.widthAnchor.constraint(equalTo: main.widthAnchor), downloadsScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 250), message.widthAnchor.constraint(equalTo: main.widthAnchor)
         ])
+        // Apply autosaved geometry only after toolbar and content constraints are
+        // installed. A stale Monterey frame can otherwise restore a toolbar-only
+        // strip despite minSize being set before the frame restoration.
+        _ = window.setFrameAutosaveName("NeatClone.MainWindow")
+        UIVerification.enforceUsableMainWindowSize(window)
         updateSidebarSelection()
         NSApp.mainMenu = UIMenus.make(target: self)
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
