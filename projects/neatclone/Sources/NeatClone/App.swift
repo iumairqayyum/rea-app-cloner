@@ -140,7 +140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
         let labels = ["All Downloads", "Downloading", "Queued", "Paused", "Completed", "Failed", "Cancelled"]
         let symbols = ["tray.full", "arrow.down.circle.fill", "clock", "pause.circle", "checkmark.circle.fill", "exclamationmark.circle.fill", "xmark.circle"]
         sidebarButtons = labels.enumerated().map { index, title in
-            let item = NSButton(title: title, image: NSImage(systemSymbolName: symbols[index], accessibilityDescription: title), target: self, action: #selector(selectSidebarFilter(_:)))
+            let image = NSImage(systemSymbolName: symbols[index], accessibilityDescription: title) ?? NSImage()
+            let item = NSButton(title: title, image: image, target: self, action: #selector(selectSidebarFilter(_:)))
             item.setButtonType(.toggle); item.bezelStyle = .rounded; item.imagePosition = .imageLeading; item.alignment = .left; item.tag = index
             item.setAccessibilityLabel("Show \(title)"); return item
         }
