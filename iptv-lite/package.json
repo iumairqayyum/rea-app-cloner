@@ -1,0 +1,27 @@
+{
+  "name": "iptv-lite",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"next dev -H 127.0.0.1\" \"wait-on http://127.0.0.1:3000 && electron .\"",
+    "build": "next build",
+    "start": "next start",
+    "electron": "electron ."
+  },
+  "dependencies": {
+    "hls.js": "^1.5.17",
+    "next": "^15.2.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "electron": "^35.0.0",
+    "wait-on": "^8.0.3",
+    "typescript": "^5.8.2",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4"
+  }
+}
